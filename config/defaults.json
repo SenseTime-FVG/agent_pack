@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "install_dir": {
+    "windows": "%LOCALAPPDATA%\\AgentPack",
+    "macos": "/usr/local/lib/agent-pack",
+    "linux": "$HOME/.agent-pack"
+  },
+  "hermes": {
+    "repo_url": "https://github.com/NousResearch/hermes-agent.git",
+    "python_version": "3.11",
+    "install_extras": "[all]"
+  },
+  "openclaw": {
+    "npm_package": "openclaw@latest",
+    "node_version": "22"
+  },
+  "llm_providers": {
+    "openrouter": {
+      "name": "OpenRouter (recommended)",
+      "base_url": "https://openrouter.ai/api/v1",
+      "signup_url": "https://openrouter.ai/keys",
+      "default_model": "nousresearch/hermes-3-llama-3.1-8b",
+      "env_var": "OPENROUTER_API_KEY"
+    },
+    "openai": {
+      "name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "signup_url": "https://platform.openai.com/api-keys",
+      "default_model": "gpt-4o-mini",
+      "env_var": "OPENAI_API_KEY"
+    },
+    "anthropic": {
+      "name": "Anthropic",
+      "base_url": "https://api.anthropic.com",
+      "signup_url": "https://console.anthropic.com/settings/keys",
+      "default_model": "claude-sonnet-4-20250514",
+      "env_var": "ANTHROPIC_API_KEY"
+    },
+    "custom": {
+      "name": "Custom Endpoint",
+      "base_url": "",
+      "signup_url": "",
+      "default_model": "",
+      "env_var": "LLM_API_KEY"
+    }
+  },
+  "skill_manifest_url": "https://skillhub.example.com/manifest.json"
+}
