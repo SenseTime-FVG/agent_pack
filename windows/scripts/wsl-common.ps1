@@ -130,23 +130,39 @@ function Assert-Wsl2Ready {
 
 # Invoke a bash command inside the user's default WSL distro.  The command
 # is passed through base64 so embedded quotes / newlines don't need shell
-# escaping.  The base64 blob is streamed via stdin rather than the wsl.exe
-# command line so we don't hit the Windows 32,767-char CreateProcess cap —
-# PowerShell 5.1 raises IndexOutOfRangeException ("索引超出了数组界限")
-# when that cap is exceeded, which blocks installs whose bash body + CN
-# mirror preamble pushes the base64 payload past the limit.
+# escaping on the wsl.exe command line.
+#
+# The base64 payload is written to a temp file rather than:
+#  - inlined into `-lc` (hits the Windows 32,767-char CreateProcess cap —
+#    PowerShell 5.1 raises IndexOutOfRangeException once the bash body plus
+#    CN mirror preamble pushes past the limit), or
+#  - piped via PowerShell stdin (stdin is consumed by base64 and closed, so
+#    interactive prompts inside the bash body — e.g. `git clone` asking
+#    for a GitHub username on a private repo — see EOF and can't read
+#    keyboard input).
+# Loading the payload from a file inside WSL keeps the outer bash's stdin
+# attached to the console, so prompts work.
 function Invoke-WslCommand {
     param([Parameter(Mandatory)][string]$Command)
 
     $normalizedCommand = $Command -replace "`r`n?", "`n"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($normalizedCommand))
 
-    # `base64 -d` is strict about whitespace; PowerShell's pipeline appends
-    # CRLF to the piped string, so -i (ignore non-alphabet chars) is required
-    # or base64 bails out with "invalid input".
-    $encodedCommand | & wsl.exe -- bash -lc 'base64 -d -i | bash'
-    if ($LASTEXITCODE -ne 0) {
-        throw "WSL command failed in default distro with exit code $LASTEXITCODE."
+    $payloadFile = [System.IO.Path]::GetTempFileName()
+    try {
+        # ASCII: base64 alphabet is 7-bit; avoid a UTF-8 BOM that would
+        # corrupt the first decoded byte.
+        [System.IO.File]::WriteAllText($payloadFile, $encodedCommand, [System.Text.Encoding]::ASCII)
+        $payloadWslPath = Convert-WindowsPathToWslPath -WindowsPath $payloadFile
+
+        # Single-quote the WSL path so bash takes it literally.
+        $bashCommand = "bash <(base64 -d -i '$payloadWslPath')"
+        & wsl.exe -- bash -lc $bashCommand
+        if ($LASTEXITCODE -ne 0) {
+            throw "WSL command failed in default distro with exit code $LASTEXITCODE."
+        }
+    } finally {
+        Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
     }
 }
 
