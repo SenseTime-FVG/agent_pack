@@ -45,6 +45,29 @@ source "$LIB_DIR/install-hermes.sh"
 source "$LIB_DIR/install-openclaw.sh"
 source "$LIB_DIR/configure-llm.sh"
 
+# CN-region environment setup: mirror env vars + TUNA apt + pre-installed uv.
+# Driven by AGENTPACK_CN=1 or a CN network probe inside cn-env.sh's caller.
+_AP_SHARED_DIR="$(cd "$INSTALLER_DIR/../shared" && pwd)"
+if [ -f "$_AP_SHARED_DIR/cn-env.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$_AP_SHARED_DIR/cn-env.sh"
+    _ap_cn_detected=0
+    case "${AGENTPACK_CN:-}" in
+        1|true|TRUE|yes|YES) _ap_cn_detected=1 ;;
+        0|false|FALSE|no|NO) _ap_cn_detected=0 ;;
+        *)
+            country="$(curl -fsSL --max-time 5 https://api.iping.cc/v1/query 2>/dev/null \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('country_code',''))" 2>/dev/null || true)"
+            [ "$country" = "CN" ] && _ap_cn_detected=1
+            ;;
+    esac
+    if [ "$_ap_cn_detected" -eq 1 ]; then
+        export AGENTPACK_CN=1
+        echo "[OK] Detected China network — using domestic mirrors (TUNA apt / npm / pip / uv)"
+        apply_cn_env
+    fi
+fi
+
 echo ""
 echo "========================================"
 echo "  Agent Pack Installer for Linux"

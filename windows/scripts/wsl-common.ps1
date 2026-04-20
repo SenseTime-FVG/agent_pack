@@ -207,19 +207,37 @@ function Test-IsChinaRegion {
 }
 
 function Get-CnMirrorBashPreamble {
-    # Bash snippet that exports standard env vars honored by uv / pip / npm /
-    # curl inside WSL.  Prepend to any WSL command that installs dependencies.
-    # No-op (empty string) when not in a China region.
+    # Bash snippet that (a) sources shared/cn-env.sh inside the agent_pack
+    # clone already present on disk, (b) invokes apply_cn_env to set uv /
+    # pip / npm mirrors, switch apt to TUNA (Ubuntu only, supported
+    # codenames only), and pre-install uv via ghproxy.
+    #
+    # Prepend to any WSL command that installs dependencies.  No-op (empty
+    # string) when not in a China region.
     if (-not (Test-IsChinaRegion)) {
         return ""
     }
 
-    return @"
+    $appRoot = Get-AgentPackRoot
+    $sharedDir = Join-Path $appRoot "shared"
+    if (-not (Test-Path (Join-Path $sharedDir "cn-env.sh"))) {
+        # Fallback: set mirror env vars inline if cn-env.sh is missing for
+        # some reason (older checkouts).  No apt/uv handling in that case.
+        return @"
+export AGENTPACK_CN=1
 export UV_INDEX_URL='$script:CnPipIndex'
 export UV_DEFAULT_INDEX='$script:CnPipIndex'
 export PIP_INDEX_URL='$script:CnPipIndex'
 export UV_PYTHON_INSTALL_MIRROR='$script:CnUvPythonMirror'
 export npm_config_registry='$script:CnNpmRegistry'
+"@
+    }
+
+    $sharedDirWsl = Convert-WindowsPathToWslPath -WindowsPath $sharedDir
+    return @"
+export AGENTPACK_CN=1
+. "$sharedDirWsl/cn-env.sh"
+apply_cn_env
 "@
 }
 
