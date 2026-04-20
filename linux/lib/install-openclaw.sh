@@ -78,5 +78,22 @@ install_openclaw() {
         return 1
     fi
 
+    # Enable local gateway mode unconditionally so `openclaw gateway` works
+    # out of the box — even when the user skipped LLM setup (empty API key).
+    # Without this, launching the gateway fails with:
+    #   Gateway start blocked: set gateway.mode=local (current: unset)
+    # `openclaw config set` is idempotent; re-running the installer is safe.
+    # Use $child_path for the lookup too, because openclaw was just installed
+    # to $npm_prefix/bin which may not be on the outer shell's PATH yet.
+    if PATH="$child_path" command -v openclaw >/dev/null 2>&1; then
+        if ! PATH="$child_path" openclaw config set gateway.mode local >/dev/null 2>&1; then
+            echo "[!] Could not set gateway.mode=local automatically."
+            echo "    Run: openclaw config set gateway.mode local"
+        fi
+    else
+        echo "[!] openclaw not found on PATH after install — skipping gateway.mode=local."
+        echo "    Run: openclaw config set gateway.mode local"
+    fi
+
     echo "[OK] OpenClaw installed."
 }

@@ -271,6 +271,9 @@ PY
 
             openclaw config set agents.defaults.model "${provider_prefix}/${model}"
             echo "[OK] OpenClaw model set via 'openclaw config set'"
+            # Note: gateway.mode=local is set unconditionally by
+            # install-openclaw.sh right after install, so it works even when
+            # the user skipped LLM setup.
             ;;
     esac
 }
