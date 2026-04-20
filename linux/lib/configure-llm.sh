@@ -2,6 +2,14 @@
 # Interactive LLM provider configuration.
 # Provider details (base_url, default_model, signup_url) are read from
 # config/defaults.json so there is a single source of truth.
+#
+# Split into two phases (mirrors the Windows installer wizard):
+#   collect_llm_config  — prompt the user up front; exports LLM_* vars.
+#   apply_llm_config    — after products install, write config files and
+#                         verify the API.  Safe to skip writing if the user
+#                         opted out (empty key).
+# This lets install.sh collect credentials BEFORE any install runs, so
+# product install failures don't block the user from having a usable config.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_DIR="$(cd "$SCRIPT_DIR/../../shared" && pwd)"
@@ -10,9 +18,13 @@ _DEFAULTS_JSON="$(cd "$SCRIPT_DIR/../.." && pwd)/config/defaults.json"
 # Helper: read a value from defaults.json
 _cfg() { python3 -c "import json; print(json.load(open('$_DEFAULTS_JSON'))$1)" 2>/dev/null; }
 
-configure_llm() {
-    local products=("$@")
+# Exported by collect_llm_config, consumed by apply_llm_config.
+LLM_PROVIDER=""
+LLM_BASE_URL=""
+LLM_MODEL=""
+LLM_API_KEY=""
 
+collect_llm_config() {
     echo ""
     echo "========================================"
     echo "  LLM Provider Configuration"
@@ -62,11 +74,31 @@ configure_llm() {
     fi
 
     echo ""
+    local api_key
     read -rsp "API Key: " api_key
     echo ""
 
+    LLM_PROVIDER="$provider"
+    LLM_BASE_URL="$base_url"
+    LLM_MODEL="$model"
+    LLM_API_KEY="$api_key"
+}
+
+apply_llm_config() {
+    local products=("$@")
+    local provider="$LLM_PROVIDER"
+    local base_url="$LLM_BASE_URL"
+    local model="$LLM_MODEL"
+    local api_key="$LLM_API_KEY"
+
+    echo ""
+    echo "========================================"
+    echo "  Writing LLM Configuration"
+    echo "========================================"
+
     if [ -z "$api_key" ]; then
-        echo "WARNING: No API key provided. You can configure it later."
+        echo "WARNING: No API key was provided earlier. Skipping config write."
+        echo "         Re-run the installer or edit ~/.hermes/.env / ~/.openclaw/openclaw.json manually."
         return 0
     fi
 
@@ -192,4 +224,12 @@ JSON
                 ;;
         esac
     done
+}
+
+# Back-compat wrapper: old callers (macOS setup-interactive.sh) still invoke
+# configure_llm as a single collect+apply step.  install.sh now calls
+# collect_llm_config up front and apply_llm_config after products install.
+configure_llm() {
+    collect_llm_config
+    apply_llm_config "$@"
 }

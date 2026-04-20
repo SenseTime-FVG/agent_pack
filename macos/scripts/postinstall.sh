@@ -51,7 +51,11 @@ pkg_install() {
     brew install "$@"
 }
 
+# Collect LLM configuration up front (mirrors the Windows installer wizard).
+collect_llm_config
+
 # Product selection
+echo ""
 echo "Which products would you like to install?"
 echo "  1) Hermes Agent"
 echo "  2) OpenClaw"
@@ -88,8 +92,8 @@ for prod in "${SELECTED_PRODUCTS[@]}"; do
     esac
 done
 
-# Configure LLM
-configure_llm "${SELECTED_PRODUCTS[@]}"
+# Write LLM config now that install dirs / templates exist.
+apply_llm_config "${SELECTED_PRODUCTS[@]}"
 
 echo ""
 echo "========================================"

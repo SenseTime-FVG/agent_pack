@@ -92,7 +92,13 @@ echo "  Agent Pack Installer for Linux"
 echo "========================================"
 echo ""
 
-# ---- Step 1: Product Selection ----
+# ---- Step 1: Collect LLM Configuration ----
+# Ask up front (mirrors the Windows installer wizard) so the user is done
+# with interactive prompts before the long-running installs start.
+collect_llm_config
+
+# ---- Step 2: Product Selection ----
+echo ""
 echo "Which products would you like to install?"
 echo "  1) Hermes Agent"
 echo "  2) OpenClaw"
@@ -113,7 +119,7 @@ echo ""
 echo "Selected: ${SELECTED_PRODUCTS[*]}"
 echo ""
 
-# ---- Step 2: Install Products ----
+# ---- Step 3: Install Products ----
 # Both Hermes and OpenClaw delegate to their official install.sh scripts,
 # which handle all dependency detection and installation internally.
 for prod in "${SELECTED_PRODUCTS[@]}"; do
@@ -123,8 +129,8 @@ for prod in "${SELECTED_PRODUCTS[@]}"; do
     esac
 done
 
-# ---- Step 3: Configure LLM ----
-configure_llm "${SELECTED_PRODUCTS[@]}"
+# ---- Step 4: Write LLM Configuration ----
+apply_llm_config "${SELECTED_PRODUCTS[@]}"
 
 # ---- Done ----
 echo ""
