@@ -155,9 +155,17 @@ function Invoke-WslCommand {
         [System.IO.File]::WriteAllText($payloadFile, $encodedCommand, [System.Text.Encoding]::ASCII)
         $payloadWslPath = Convert-WindowsPathToWslPath -WindowsPath $payloadFile
 
-        # Single-quote the WSL path so bash takes it literally.
-        $bashCommand = "bash <(base64 -d -i '$payloadWslPath')"
-        & wsl.exe -- bash -lc $bashCommand
+        # Decode the payload into a temp bash script inside WSL, then run it
+        # with `bash <script>` so the script's stdin stays attached to the
+        # console (interactive git-credential prompts work).
+        #
+        # Avoid process substitution `bash <(...)` on the PowerShell side:
+        # wsl.exe 5.1 has mishandled Win32 argv strings containing `<(` and
+        # trips with "程序"wsl.exe"无法运行: 索引超出了数组界限".  Running
+        # the two-step decode + exec inside a single -lc string keeps every
+        # argument simple enough for wsl.exe's argv forwarding.
+        $bashScript = 'set -euo pipefail; tmp=$(mktemp); trap "rm -f $tmp" EXIT; base64 -d -i "$1" > "$tmp"; bash "$tmp"'
+        & wsl.exe -- bash -lc $bashScript _ $payloadWslPath
         if ($LASTEXITCODE -ne 0) {
             throw "WSL command failed in default distro with exit code $LASTEXITCODE."
         }
