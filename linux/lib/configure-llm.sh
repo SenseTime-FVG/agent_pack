@@ -19,10 +19,12 @@ _DEFAULTS_JSON="$(cd "$SCRIPT_DIR/../.." && pwd)/config/defaults.json"
 _cfg() { python3 -c "import json; print(json.load(open('$_DEFAULTS_JSON'))$1)" 2>/dev/null; }
 
 # Exported by collect_llm_config, consumed by apply_llm_config.
-LLM_PROVIDER=""
-LLM_BASE_URL=""
-LLM_MODEL=""
-LLM_API_KEY=""
+# Use ":=" so that callers who pre-populated these (e.g. Windows's
+# install-hermes.ps1 passing LLM_* via the WSL bash body) are preserved.
+: "${LLM_PROVIDER:=}"
+: "${LLM_BASE_URL:=}"
+: "${LLM_MODEL:=}"
+: "${LLM_API_KEY:=}"
 
 collect_llm_config() {
     echo ""
@@ -204,27 +206,71 @@ PY
             echo "[OK] Hermes API key saved to ~/.hermes/.env ($env_key)"
             ;;
         openclaw)
-            mkdir -p "$HOME/.openclaw"
+            # openclaw.json has a strict zod schema — we cannot hand-roll it
+            # safely (an earlier version of this function wrote bogus top-
+            # level keys and bricked `openclaw gateway` with "Unrecognized
+            # keys").  Use the CLI for model selection; let openclaw's
+            # bundled provider definitions supply baseUrl/endpoints; and put
+            # the API key in ~/.openclaw/.env, which openclaw auto-loads
+            # (see src/infra/dotenv.ts: loadDotEnv).
             local provider_prefix
             case "$provider" in
                 openrouter) provider_prefix="openrouter" ;;
-                openai) provider_prefix="openai" ;;
-                anthropic) provider_prefix="anthropic" ;;
-                *) provider_prefix="openai" ;;
+                openai)     provider_prefix="openai"     ;;
+                anthropic)  provider_prefix="anthropic"  ;;
+                custom)     provider_prefix="openai"     ;;
+                *)          provider_prefix="openai"     ;;
             esac
-            cat > "$HOME/.openclaw/openclaw.json" << JSON
-{
-  "agent": {
-    "model": "${provider_prefix}/${model}"
-  },
-  "providers": {
-    "${provider_prefix}": {
-      "apiKey": "${api_key}"
-    }
-  }
-}
-JSON
-            echo "[OK] OpenClaw config written to ~/.openclaw/openclaw.json"
+
+            local env_key
+            case "$provider" in
+                openrouter) env_key="OPENROUTER_API_KEY" ;;
+                openai)     env_key="OPENAI_API_KEY"     ;;
+                anthropic)  env_key="ANTHROPIC_API_KEY"  ;;
+                custom)     env_key="OPENAI_API_KEY"     ;;
+                *)          env_key="OPENROUTER_API_KEY" ;;
+            esac
+
+            mkdir -p "$HOME/.openclaw"
+            local env_file="$HOME/.openclaw/.env"
+            touch "$env_file"
+            chmod 600 "$env_file" 2>/dev/null || true
+            local keys_to_replace="$env_key"
+            if [ "$provider" = "custom" ]; then
+                keys_to_replace="$env_key OPENAI_BASE_URL"
+            fi
+            for k in $keys_to_replace; do
+                sed -i.bak "/^${k}=/d" "$env_file" 2>/dev/null || true
+            done
+            rm -f "$env_file.bak" 2>/dev/null || true
+            printf '%s=%s\n' "$env_key" "$api_key" >> "$env_file"
+            if [ "$provider" = "custom" ]; then
+                printf 'OPENAI_BASE_URL=%s\n' "$base_url" >> "$env_file"
+            fi
+            echo "[OK] OpenClaw API key saved to ~/.openclaw/.env ($env_key)"
+
+            if ! command -v openclaw >/dev/null 2>&1; then
+                echo "[!] openclaw CLI not on PATH — skipping model default."
+                echo "    Run 'openclaw config set agents.defaults.model \"${provider_prefix}/${model}\"' after launching a new shell."
+                return 0
+            fi
+
+            # `openclaw config set` refuses to run if openclaw.json fails
+            # schema validation (e.g. stale bad writes from earlier installer
+            # versions).  `openclaw config file` prints "Config invalid"
+            # before the file path in that case — exit stays 0, so we detect
+            # the string explicitly.  On invalid, back the file up so the
+            # next `set` re-seeds a valid minimal one.
+            local cfg="$HOME/.openclaw/openclaw.json"
+            if [ -f "$cfg" ]; then
+                if openclaw config file 2>&1 | grep -q "Config invalid"; then
+                    echo "[*] Existing openclaw.json is invalid; backing up to openclaw.json.bak and resetting."
+                    mv "$cfg" "$cfg.bak" 2>/dev/null || rm -f "$cfg"
+                fi
+            fi
+
+            openclaw config set agents.defaults.model "${provider_prefix}/${model}"
+            echo "[OK] OpenClaw model set via 'openclaw config set'"
             ;;
     esac
 }
