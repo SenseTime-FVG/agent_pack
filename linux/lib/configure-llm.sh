@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Interactive LLM provider configuration
+# Interactive LLM provider configuration.
+# Provider details (base_url, default_model, signup_url) are read from
+# config/defaults.json so there is a single source of truth.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_DIR="$(cd "$SCRIPT_DIR/../../shared" && pwd)"
+_DEFAULTS_JSON="$(cd "$SCRIPT_DIR/../.." && pwd)/config/defaults.json"
+
+# Helper: read a value from defaults.json
+_cfg() { python3 -c "import json; print(json.load(open('$_DEFAULTS_JSON'))$1)" 2>/dev/null; }
 
 configure_llm() {
     local products=("$@")
@@ -13,10 +19,10 @@ configure_llm() {
     echo "========================================"
     echo ""
     echo "Select your LLM provider:"
-    echo "  1) OpenRouter (recommended — 200+ models, free tier)"
-    echo "  2) OpenAI"
-    echo "  3) Anthropic"
-    echo "  4) Custom endpoint"
+    echo "  1) $(_cfg "['llm_providers']['openrouter']['name']")"
+    echo "  2) $(_cfg "['llm_providers']['openai']['name']")"
+    echo "  3) $(_cfg "['llm_providers']['anthropic']['name']")"
+    echo "  4) $(_cfg "['llm_providers']['custom']['name']")"
     echo ""
 
     local choice
@@ -25,27 +31,34 @@ configure_llm() {
 
     local provider base_url model
     case "$choice" in
-        1) provider="openrouter"; base_url="https://openrouter.ai/api/v1"; model="nousresearch/hermes-3-llama-3.1-8b" ;;
-        2) provider="openai"; base_url="https://api.openai.com/v1"; model="gpt-4o-mini" ;;
-        3) provider="anthropic"; base_url="https://api.anthropic.com"; model="claude-sonnet-4-20250514" ;;
+        1) provider="openrouter"
+           base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
+           model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           ;;
+        2) provider="openai"
+           base_url="$(_cfg "['llm_providers']['openai']['base_url']")"
+           model="$(_cfg "['llm_providers']['openai']['default_model']")"
+           ;;
+        3) provider="anthropic"
+           base_url="$(_cfg "['llm_providers']['anthropic']['base_url']")"
+           model="$(_cfg "['llm_providers']['anthropic']['default_model']")"
+           ;;
         4) provider="custom"
            read -rp "Base URL: " base_url
            read -rp "Model name: " model
            ;;
         *) echo "Invalid choice, defaulting to OpenRouter."
-           provider="openrouter"; base_url="https://openrouter.ai/api/v1"; model="nousresearch/hermes-3-llama-3.1-8b" ;;
+           provider="openrouter"
+           base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
+           model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           ;;
     esac
 
-    local signup_hint=""
-    case "$provider" in
-        openrouter) signup_hint="Get your key at: https://openrouter.ai/keys" ;;
-        openai) signup_hint="Get your key at: https://platform.openai.com/api-keys" ;;
-        anthropic) signup_hint="Get your key at: https://console.anthropic.com/settings/keys" ;;
-    esac
-
-    if [ -n "$signup_hint" ]; then
+    local signup_url
+    signup_url="$(_cfg "['llm_providers']['$provider']['signup_url']")"
+    if [ -n "$signup_url" ]; then
         echo ""
-        echo "$signup_hint"
+        echo "Get your key at: $signup_url"
     fi
 
     echo ""
@@ -57,15 +70,19 @@ configure_llm() {
         return 0
     fi
 
-    echo "[*] Verifying API connection..."
-    if $PYTHON_CMD "$SHARED_DIR/verify-llm.py" \
-        --provider "$provider" \
-        --api-key "$api_key" \
-        --base-url "$base_url" \
-        --model "$model"; then
-        echo "[OK] Connection verified!"
-    else
-        echo "WARNING: Could not verify connection. Saving config anyway."
+    # Verify connection if python3 is available
+    local python_cmd="${PYTHON_CMD:-python3}"
+    if command -v "$python_cmd" &>/dev/null && [ -f "$SHARED_DIR/verify-llm.py" ]; then
+        echo "[*] Verifying API connection..."
+        if "$python_cmd" "$SHARED_DIR/verify-llm.py" \
+            --provider "$provider" \
+            --api-key "$api_key" \
+            --base-url "$base_url" \
+            --model "$model"; then
+            echo "[OK] Connection verified!"
+        else
+            echo "WARNING: Could not verify connection. Saving config anyway."
+        fi
     fi
 
     for prod in "${products[@]}"; do

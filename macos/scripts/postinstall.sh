@@ -27,11 +27,14 @@ SHARED_DIR="$INSTALL_DIR/shared"
 LINUX_LIB="$INSTALL_DIR/linux/lib"
 
 # Reuse Linux library functions (they work on macOS bash too)
-source "$LINUX_LIB/detect-deps.sh"
 source "$LINUX_LIB/install-hermes.sh"
 source "$LINUX_LIB/install-openclaw.sh"
 source "$LINUX_LIB/configure-llm.sh"
-source "$LINUX_LIB/install-skills.sh"
+
+# Ensure brew is in PATH (Apple Silicon)
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
 
 echo ""
 echo "========================================"
@@ -65,44 +68,9 @@ case "$product_choice" in
     *) SELECTED_PRODUCTS=("hermes") ;;
 esac
 
-# Install deps
-echo ""
-echo "========================================"
-echo "  Installing Dependencies"
-echo "========================================"
-
-ensure_git
-
-NEED_PYTHON=false
-NEED_NODE=false
-for prod in "${SELECTED_PRODUCTS[@]}"; do
-    case "$prod" in
-        hermes) NEED_PYTHON=true ;;
-        openclaw) NEED_NODE=true ;;
-    esac
-done
-
-if [ "$NEED_PYTHON" = true ]; then
-    # macOS-specific Python install
-    if ! command -v python3.11 &>/dev/null; then
-        echo "[*] Installing Python 3.11..."
-        brew install python@3.11
-    fi
-    PYTHON_CMD="python3.11"
-    export PYTHON_CMD
-    echo "[OK] Python: $($PYTHON_CMD --version)"
-    ensure_uv
-fi
-
-if [ "$NEED_NODE" = true ]; then
-    if ! command -v node &>/dev/null || [ "$(node -v | sed 's/v//' | cut -d. -f1)" -lt 22 ]; then
-        echo "[*] Installing Node.js 22..."
-        brew install node@22
-    fi
-    echo "[OK] Node.js: $(node -v)"
-fi
-
 # Install products
+# Both Hermes and OpenClaw delegate to their official install.sh scripts,
+# which handle all dependency detection and installation internally.
 for prod in "${SELECTED_PRODUCTS[@]}"; do
     case "$prod" in
         hermes) install_hermes ;;
@@ -112,9 +80,6 @@ done
 
 # Configure LLM
 configure_llm "${SELECTED_PRODUCTS[@]}"
-
-# Install skills
-install_skills "${SELECTED_PRODUCTS[@]}"
 
 echo ""
 echo "========================================"

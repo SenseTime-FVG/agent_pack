@@ -24,6 +24,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+; Requires Inno Setup 6.1+ with Chinese language pack installed.
+; If ChineseSimplified.isl is missing, install it from:
+;   https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl
+; and place it in the Inno Setup "Languages" folder.
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
@@ -31,6 +35,9 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: recursesubdirs
 Source: "..\shared\*"; DestDir: "{app}\shared"; Flags: recursesubdirs
 Source: "..\config\*"; DestDir: "{app}\config"; Flags: recursesubdirs
+; Bundle pre-cloned repos (skills are already included inside each repo)
+Source: "..\repos\hermes-agent\*"; DestDir: "{app}\repos\hermes-agent"; Flags: recursesubdirs
+Source: "..\repos\openclaw\*"; DestDir: "{app}\repos\openclaw"; Flags: recursesubdirs
 
 [Icons]
 ; Created conditionally in code section based on product selection
@@ -42,54 +49,192 @@ Type: dirifempty; Name: "{app}"
 [Code]
 var
   ProductPage: TWizardPage;
-  HermesCheckbox: TCheckBox;
-  OpenClawCheckbox: TCheckBox;
+  HermesCheckbox: TNewCheckBox;
+  OpenClawCheckbox: TNewCheckBox;
   ProviderPage: TWizardPage;
-  ProviderRadios: array of TRadioButton;
-  ApiKeyEdit: TEdit;
-  BaseUrlEdit: TEdit;
-  ModelEdit: TEdit;
+  ProviderRadios: array of TNewRadioButton;
+  ApiKeyEdit: TNewEdit;
+  BaseUrlLabel: TLabel;
+  BaseUrlEdit: TNewEdit;
+  ModelLabel: TLabel;
+  ModelEdit: TNewEdit;
   CustomPanel: TPanel;
-  VerifyButton: TButton;
+  VerifyButton: TNewButton;
   VerifyLabel: TLabel;
+  ProviderModels: array[0..3] of String;
+  ProviderBaseUrls: array[0..3] of String;
+  ActiveProviderIndex: Integer;
+
+function MaxValueInt(const A, B: Integer): Integer;
+begin
+  if A > B then
+    Result := A
+  else
+    Result := B;
+end;
+
+function GetSelectedProviderIndex: Integer;
+begin
+  if ProviderRadios[0].Checked then
+    Result := 0
+  else if ProviderRadios[1].Checked then
+    Result := 1
+  else if ProviderRadios[2].Checked then
+    Result := 2
+  else
+    Result := 3;
+end;
+
+function GetProviderName(const ProviderIndex: Integer): String;
+begin
+  case ProviderIndex of
+    0: Result := 'openrouter';
+    1: Result := 'openai';
+    2: Result := 'anthropic';
+  else
+    Result := 'custom';
+  end;
+end;
+
+function GetDefaultBaseUrl(const ProviderIndex: Integer): String;
+begin
+  case ProviderIndex of
+    0: Result := 'https://openrouter.ai/api/v1';
+    1: Result := 'https://api.openai.com/v1';
+    2: Result := 'https://api.anthropic.com';
+  else
+    Result := '';
+  end;
+end;
+
+function GetDefaultModel(const ProviderIndex: Integer): String;
+begin
+  case ProviderIndex of
+    0: Result := 'nousresearch/hermes-3-llama-3.1-8b';
+    1: Result := 'gpt-4o-mini';
+    2: Result := 'claude-sonnet-4-20250514';
+  else
+    Result := '';
+  end;
+end;
+
+procedure SaveProviderFieldValues;
+begin
+  if (ActiveProviderIndex < 0) or (ActiveProviderIndex > 3) then begin
+    Exit;
+  end;
+
+  if ModelEdit <> nil then begin
+    ProviderModels[ActiveProviderIndex] := Trim(ModelEdit.Text);
+  end;
+
+  if BaseUrlEdit <> nil then begin
+    ProviderBaseUrls[ActiveProviderIndex] := Trim(BaseUrlEdit.Text);
+  end;
+end;
+
+procedure UpdateProviderFieldLayout;
+var
+  SelectedIndex: Integer;
+  LabelGap, RowGap: Integer;
+begin
+  if (CustomPanel = nil) or (BaseUrlLabel = nil) or (BaseUrlEdit = nil) or
+     (ModelLabel = nil) or (ModelEdit = nil) then begin
+    Exit;
+  end;
+
+  SaveProviderFieldValues;
+  SelectedIndex := GetSelectedProviderIndex;
+  ActiveProviderIndex := SelectedIndex;
+
+  if ProviderModels[SelectedIndex] = '' then begin
+    ProviderModels[SelectedIndex] := GetDefaultModel(SelectedIndex);
+  end;
+  if ProviderBaseUrls[SelectedIndex] = '' then begin
+    ProviderBaseUrls[SelectedIndex] := GetDefaultBaseUrl(SelectedIndex);
+  end;
+
+  LabelGap := ScaleY(6);
+  RowGap := ScaleY(4);
+
+  CustomPanel.Visible := True;
+  BaseUrlLabel.Visible := (SelectedIndex = 3);
+  BaseUrlEdit.Visible := (SelectedIndex = 3);
+
+  if BaseUrlLabel.Visible then begin
+    BaseUrlLabel.Top := 0;
+    BaseUrlEdit.Top := BaseUrlLabel.Top + BaseUrlLabel.Height + LabelGap;
+    ModelLabel.Top := BaseUrlEdit.Top + BaseUrlEdit.Height + RowGap;
+    BaseUrlEdit.Text := ProviderBaseUrls[SelectedIndex];
+  end else begin
+    ModelLabel.Top := 0;
+    BaseUrlEdit.Text := GetDefaultBaseUrl(SelectedIndex);
+  end;
+
+  ModelEdit.Text := ProviderModels[SelectedIndex];
+  ModelEdit.Top := ModelLabel.Top + ModelLabel.Height + LabelGap;
+  CustomPanel.Height := ModelEdit.Top + ModelEdit.Height;
+end;
 
 // ---- Product Selection Page ----
 procedure CreateProductPage;
 var
   lbl: TLabel;
+  note: TLabel;
+  yPos: Integer;
+  LabelGap, RowGap, SectionGap: Integer;
+  SideIndent, CheckHeight: Integer;
 begin
   ProductPage := CreateCustomPage(wpSelectDir,
     'Select Products', 'Choose which AI agents to install.');
 
-  lbl := TLabel.Create(ProductPage);
+  LabelGap := ScaleY(6);
+  RowGap := ScaleY(6);
+  SectionGap := ScaleY(10);
+  SideIndent := ScaleX(20);
+  CheckHeight := ScaleY(20);
+
+  lbl := TLabel.Create(WizardForm);
   lbl.Parent := ProductPage.Surface;
   lbl.Caption := 'Select one or more products to install:';
-  lbl.Top := 10;
+  lbl.Top := ScaleY(8);
   lbl.Left := 0;
   lbl.Width := ProductPage.SurfaceWidth;
+  yPos := lbl.Top + lbl.Height + SectionGap;
 
-  HermesCheckbox := TCheckBox.Create(ProductPage);
+  HermesCheckbox := TNewCheckBox.Create(WizardForm);
   HermesCheckbox.Parent := ProductPage.Surface;
   HermesCheckbox.Caption := 'Hermes Agent — Self-improving AI agent by Nous Research';
-  HermesCheckbox.Top := 50;
-  HermesCheckbox.Left := 20;
-  HermesCheckbox.Width := ProductPage.SurfaceWidth - 40;
+  HermesCheckbox.Top := yPos;
+  HermesCheckbox.Left := SideIndent;
+  HermesCheckbox.Width := ProductPage.SurfaceWidth - (SideIndent * 2);
+  HermesCheckbox.Height := MaxValueInt(HermesCheckbox.Height, CheckHeight);
   HermesCheckbox.Checked := True;
+  yPos := HermesCheckbox.Top + HermesCheckbox.Height + RowGap;
 
-  OpenClawCheckbox := TCheckBox.Create(ProductPage);
+  OpenClawCheckbox := TNewCheckBox.Create(WizardForm);
   OpenClawCheckbox.Parent := ProductPage.Surface;
   OpenClawCheckbox.Caption := 'OpenClaw — Multi-channel AI gateway';
-  OpenClawCheckbox.Top := 80;
-  OpenClawCheckbox.Left := 20;
-  OpenClawCheckbox.Width := ProductPage.SurfaceWidth - 40;
+  OpenClawCheckbox.Top := yPos;
+  OpenClawCheckbox.Left := SideIndent;
+  OpenClawCheckbox.Width := ProductPage.SurfaceWidth - (SideIndent * 2);
+  OpenClawCheckbox.Height := MaxValueInt(OpenClawCheckbox.Height, CheckHeight);
   OpenClawCheckbox.Checked := False;
+  yPos := OpenClawCheckbox.Top + OpenClawCheckbox.Height + SectionGap;
+
+  note := TLabel.Create(WizardForm);
+  note.Parent := ProductPage.Surface;
+  note.Caption := 'Windows installs run inside WSL2. If no WSL2 distro is available, setup will stop and ask you to install one first.';
+  note.Top := yPos;
+  note.Left := SideIndent;
+  note.Width := ProductPage.SurfaceWidth - (SideIndent * 2);
+  note.WordWrap := True;
 end;
 
 // ---- Provider Selection Page ----
 procedure OnProviderChange(Sender: TObject);
 begin
-  // Show custom URL fields only when "Custom" is selected
-  CustomPanel.Visible := ProviderRadios[3].Checked;
+  UpdateProviderFieldLayout;
 end;
 
 procedure OnVerifyClick(Sender: TObject);
@@ -97,18 +242,18 @@ var
   ResultCode: Integer;
   Provider, Cmd: String;
 begin
-  if ProviderRadios[0].Checked then Provider := 'openrouter'
-  else if ProviderRadios[1].Checked then Provider := 'openai'
-  else if ProviderRadios[2].Checked then Provider := 'anthropic'
-  else Provider := 'custom';
+  Provider := GetProviderName(GetSelectedProviderIndex);
 
   Cmd := 'python "' + ExpandConstant('{app}') + '\shared\verify-llm.py"'
     + ' --provider ' + Provider
     + ' --api-key "' + ApiKeyEdit.Text + '"';
 
+  if Trim(ModelEdit.Text) <> '' then begin
+    Cmd := Cmd + ' --model "' + ModelEdit.Text + '"';
+  end;
+
   if Provider = 'custom' then begin
     Cmd := Cmd + ' --base-url "' + BaseUrlEdit.Text + '"';
-    Cmd := Cmd + ' --model "' + ModelEdit.Text + '"';
   end;
 
   VerifyLabel.Caption := 'Verifying...';
@@ -133,15 +278,26 @@ var
   lbl: TLabel;
   providerNames: array of String;
   i, yPos: Integer;
+  LabelGap, RowGap, SectionGap: Integer;
+  RadioIndent, ButtonGap, ButtonWidth, RadioHeight: Integer;
 begin
   ProviderPage := CreateCustomPage(ProductPage.ID,
     'LLM Provider', 'Configure your AI model provider.');
 
-  lbl := TLabel.Create(ProviderPage);
+  LabelGap := ScaleY(6);
+  RowGap := ScaleY(4);
+  SectionGap := ScaleY(10);
+  RadioIndent := ScaleX(20);
+  ButtonGap := ScaleX(10);
+  ButtonWidth := ScaleX(100);
+  RadioHeight := ScaleY(18);
+
+  lbl := TLabel.Create(WizardForm);
   lbl.Parent := ProviderPage.Surface;
   lbl.Caption := 'Select your LLM provider:';
-  lbl.Top := 5;
+  lbl.Top := ScaleY(5);
   lbl.Left := 0;
+  yPos := lbl.Top + lbl.Height + LabelGap;
 
   SetArrayLength(providerNames, 4);
   providerNames[0] := 'OpenRouter (recommended - 200+ models, free tier)';
@@ -150,82 +306,89 @@ begin
   providerNames[3] := 'Custom endpoint';
 
   SetArrayLength(ProviderRadios, 4);
-  yPos := 30;
   for i := 0 to 3 do begin
-    ProviderRadios[i] := TRadioButton.Create(ProviderPage);
+    ProviderRadios[i] := TNewRadioButton.Create(WizardForm);
     ProviderRadios[i].Parent := ProviderPage.Surface;
     ProviderRadios[i].Caption := providerNames[i];
     ProviderRadios[i].Top := yPos;
-    ProviderRadios[i].Left := 20;
-    ProviderRadios[i].Width := ProviderPage.SurfaceWidth - 40;
+    ProviderRadios[i].Left := RadioIndent;
+    ProviderRadios[i].Width := ProviderPage.SurfaceWidth - (RadioIndent * 2);
+    ProviderRadios[i].Height := MaxValueInt(ProviderRadios[i].Height, RadioHeight);
     ProviderRadios[i].OnClick := @OnProviderChange;
-    yPos := yPos + 24;
+    yPos := ProviderRadios[i].Top + ProviderRadios[i].Height + RowGap;
   end;
-  ProviderRadios[0].Checked := True;
+  yPos := yPos + SectionGap;
 
   // API Key
-  lbl := TLabel.Create(ProviderPage);
+  lbl := TLabel.Create(WizardForm);
   lbl.Parent := ProviderPage.Surface;
   lbl.Caption := 'API Key:';
-  lbl.Top := yPos + 15;
+  lbl.Top := yPos;
   lbl.Left := 0;
+  yPos := lbl.Top + lbl.Height + LabelGap;
 
-  ApiKeyEdit := TEdit.Create(ProviderPage);
+  ApiKeyEdit := TNewEdit.Create(WizardForm);
   ApiKeyEdit.Parent := ProviderPage.Surface;
-  ApiKeyEdit.Top := yPos + 35;
+  ApiKeyEdit.Top := yPos;
   ApiKeyEdit.Left := 0;
-  ApiKeyEdit.Width := ProviderPage.SurfaceWidth - 120;
   ApiKeyEdit.PasswordChar := '*';
 
   // Verify button
-  VerifyButton := TButton.Create(ProviderPage);
+  VerifyButton := TNewButton.Create(WizardForm);
   VerifyButton.Parent := ProviderPage.Surface;
   VerifyButton.Caption := 'Verify';
-  VerifyButton.Top := yPos + 33;
-  VerifyButton.Left := ProviderPage.SurfaceWidth - 110;
-  VerifyButton.Width := 100;
+  VerifyButton.Width := ButtonWidth;
+  VerifyButton.Left := ProviderPage.SurfaceWidth - VerifyButton.Width;
   VerifyButton.OnClick := @OnVerifyClick;
 
-  VerifyLabel := TLabel.Create(ProviderPage);
+  ApiKeyEdit.Width := VerifyButton.Left - ButtonGap;
+  VerifyButton.Top := ApiKeyEdit.Top + ((ApiKeyEdit.Height - VerifyButton.Height) div 2);
+
+  VerifyLabel := TLabel.Create(WizardForm);
   VerifyLabel.Parent := ProviderPage.Surface;
-  VerifyLabel.Top := yPos + 60;
+  VerifyLabel.AutoSize := False;
   VerifyLabel.Left := 0;
   VerifyLabel.Width := ProviderPage.SurfaceWidth;
+  VerifyLabel.Height := ScaleY(14);
+  VerifyLabel.Top := ApiKeyEdit.Top + ApiKeyEdit.Height + LabelGap;
   VerifyLabel.Caption := '';
+  yPos := VerifyLabel.Top + VerifyLabel.Height + RowGap;
 
   // Custom endpoint fields (hidden by default)
-  CustomPanel := TPanel.Create(ProviderPage);
+  CustomPanel := TPanel.Create(WizardForm);
   CustomPanel.Parent := ProviderPage.Surface;
-  CustomPanel.Top := yPos + 85;
+  CustomPanel.Top := yPos;
   CustomPanel.Left := 0;
   CustomPanel.Width := ProviderPage.SurfaceWidth;
-  CustomPanel.Height := 70;
   CustomPanel.BevelOuter := bvNone;
-  CustomPanel.Visible := False;
+  CustomPanel.Visible := True;
 
-  lbl := TLabel.Create(ProviderPage);
-  lbl.Parent := CustomPanel;
-  lbl.Caption := 'Base URL:';
-  lbl.Top := 0;
-  lbl.Left := 0;
+  BaseUrlLabel := TLabel.Create(WizardForm);
+  BaseUrlLabel.Parent := CustomPanel;
+  BaseUrlLabel.Caption := 'Base URL:';
+  BaseUrlLabel.Top := 0;
+  BaseUrlLabel.Left := 0;
 
-  BaseUrlEdit := TEdit.Create(ProviderPage);
+  BaseUrlEdit := TNewEdit.Create(WizardForm);
   BaseUrlEdit.Parent := CustomPanel;
-  BaseUrlEdit.Top := 18;
+  BaseUrlEdit.Top := BaseUrlLabel.Top + BaseUrlLabel.Height + LabelGap;
   BaseUrlEdit.Left := 0;
   BaseUrlEdit.Width := ProviderPage.SurfaceWidth;
 
-  lbl := TLabel.Create(ProviderPage);
-  lbl.Parent := CustomPanel;
-  lbl.Caption := 'Model name:';
-  lbl.Top := 42;
-  lbl.Left := 0;
+  ModelLabel := TLabel.Create(WizardForm);
+  ModelLabel.Parent := CustomPanel;
+  ModelLabel.Caption := 'Model name:';
+  ModelLabel.Left := 0;
 
-  ModelEdit := TEdit.Create(ProviderPage);
+  ModelEdit := TNewEdit.Create(WizardForm);
   ModelEdit.Parent := CustomPanel;
-  ModelEdit.Top := 58;
+  ModelEdit.Top := BaseUrlEdit.Top + BaseUrlEdit.Height + RowGap;
   ModelEdit.Left := 0;
   ModelEdit.Width := ProviderPage.SurfaceWidth;
+
+  ActiveProviderIndex := -1;
+  ProviderRadios[0].Checked := True;
+  UpdateProviderFieldLayout;
 end;
 
 // ---- Validation ----
@@ -241,33 +404,108 @@ begin
 end;
 
 // ---- Post-Install: Run Scripts ----
+
+function GetAgentPackLogPath(const Name: String): String;
+begin
+  Result := ExpandConstant('{localappdata}') + '\AgentPack\logs\' + Name + '.log';
+end;
+
+// Run a command, returning True on success.  If it fails, show a dialog
+// offering Retry / Skip / Abort.  Retry reruns the same command.  Skip
+// continues the overall flow (returns False so the caller can decide).
+// Abort terminates the installation.
+function ExecWithRetry(const FileName, Params, FailMessage: String; const ShowCmd: Integer): Boolean;
+var
+  ResultCode, Response: Integer;
+  Prompt: String;
+begin
+  Result := False;
+  while True do begin
+    if Exec(FileName, Params, '', ShowCmd, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then begin
+      Result := True;
+      Exit;
+    end;
+
+    Prompt := FailMessage + #13#10#13#10
+      + 'Exit code: ' + IntToStr(ResultCode) + #13#10#13#10
+      + 'Click Retry to try again, Cancel to abort installation.';
+    Response := MsgBox(Prompt, mbError, MB_RETRYCANCEL);
+    if Response = IDCANCEL then begin
+      Abort;
+    end;
+    // IDRETRY: loop and try again
+  end;
+end;
+
+// Launch a PowerShell install script in a fresh, VISIBLE console window so the
+// user can watch progress and read the error if something fails.  We go
+// through `cmd.exe /c start "title" /wait conhost.exe powershell.exe ...` so
+// that Windows actually allocates a new console window attached to our
+// PowerShell process (Exec() alone does not, which is why output was invisible
+// before).  The trailing `pause` keeps the window open after failure so the
+// user can read the error.
+function ExecVisiblePwshWithRetry(const ScriptPath, FailMessage, LogPath: String): Boolean;
+var
+  Cmd, Params, FullMsg: String;
+  ResultCode, Response: Integer;
+begin
+  Result := False;
+  // start /wait: parent cmd waits until console closes
+  // conhost.exe /c powershell ... : forces a real console window
+  Cmd :=
+    'start "Agent Pack - WSL2 Installer" /wait conhost.exe powershell.exe '
+    + '-NoProfile -ExecutionPolicy Bypass -NoExit -Command '
+    + '"try { & ''' + ScriptPath + ''' } catch { Write-Host $_ -ForegroundColor Red; exit 1 } finally { Write-Host ''''; Write-Host ''Press any key to close this window...''; $null = $Host.UI.RawUI.ReadKey(''NoEcho,IncludeKeyDown'') }"';
+  Params := '/c ' + Cmd;
+
+  while True do begin
+    if Exec('cmd.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then begin
+      Result := True;
+      Exit;
+    end;
+
+    FullMsg := FailMessage + #13#10#13#10
+      + 'Exit code: ' + IntToStr(ResultCode) + #13#10
+      + 'Log file: ' + LogPath + #13#10#13#10
+      + 'Click Retry to try again, Cancel to abort installation.';
+    Response := MsgBox(FullMsg, mbError, MB_RETRYCANCEL);
+    if Response = IDCANCEL then begin
+      Abort;
+    end;
+  end;
+end;
+
 procedure RunInstallScripts;
 var
-  ResultCode: Integer;
   ScriptsDir, SharedDir, Params: String;
 begin
   ScriptsDir := ExpandConstant('{app}') + '\scripts';
   SharedDir := ExpandConstant('{app}') + '\shared';
 
-  // Install dependencies
-  Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\install-deps.ps1"';
-  if HermesCheckbox.Checked then Params := Params + ' -NeedPython';
-  if OpenClawCheckbox.Checked then Params := Params + ' -NeedNode';
-  Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+  // Run the WSL2 readiness check in a visible console so the user can read the
+  // multi-line install guidance that Assert-Wsl2Ready prints on failure
+  // (wsl --install, Microsoft Store link, etc.).  With SW_HIDE those messages
+  // were invisible and the user only saw a vague "WSL2 is required" dialog.
+  ExecVisiblePwshWithRetry(
+    ScriptsDir + '\install-deps.ps1',
+    'WSL2 is not ready. See the console window for install instructions, then click Retry. ' +
+    'Typical fix: open PowerShell as Administrator and run `wsl --install` (then reboot).',
+    GetAgentPackLogPath('install-deps'));
 
-  // Install Hermes
   if HermesCheckbox.Checked then begin
-    Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\install-hermes.ps1"';
-    Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+    ExecVisiblePwshWithRetry(
+      ScriptsDir + '\install-hermes.ps1',
+      'Failed to install Hermes Agent inside WSL2.',
+      GetAgentPackLogPath('install-hermes'));
   end;
 
-  // Install OpenClaw
   if OpenClawCheckbox.Checked then begin
-    Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\install-openclaw.ps1"';
-    Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+    ExecVisiblePwshWithRetry(
+      ScriptsDir + '\install-openclaw.ps1',
+      'Failed to install OpenClaw inside WSL2.',
+      GetAgentPackLogPath('install-openclaw'));
   end;
 
-  // Configure LLM
   if ApiKeyEdit.Text <> '' then begin
     Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\configure-llm.ps1"';
     if ProviderRadios[0].Checked then Params := Params + ' -Provider openrouter'
@@ -275,50 +513,70 @@ begin
     else if ProviderRadios[2].Checked then Params := Params + ' -Provider anthropic'
     else Params := Params + ' -Provider custom';
     Params := Params + ' -ApiKey "' + ApiKeyEdit.Text + '"';
-    if CustomPanel.Visible then begin
-      Params := Params + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
+    if Trim(ModelEdit.Text) <> '' then begin
       Params := Params + ' -Model "' + ModelEdit.Text + '"';
+    end;
+    if ProviderRadios[3].Checked then begin
+      Params := Params + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
     end;
     if HermesCheckbox.Checked then Params := Params + ' -Hermes';
     if OpenClawCheckbox.Checked then Params := Params + ' -OpenClaw';
     Params := Params + ' -SharedDir "' + SharedDir + '"';
-    Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+    ExecWithRetry('powershell.exe', Params, 'Failed to write WSL2 LLM configuration.', SW_HIDE);
   end;
 
-  // Install skills
-  Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\install-skills.ps1"';
-  Params := Params + ' -SharedDir "' + SharedDir + '"';
-  Params := Params + ' -Products';
-  if HermesCheckbox.Checked then Params := Params + ' hermes';
-  if OpenClawCheckbox.Checked then Params := Params + ' openclaw';
-  Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CreateShortcutViaPS(const ShortcutPath, TargetExe, Params, WorkDir, Description: String);
+var
+  PSCmd: String;
+  ResultCode: Integer;
+begin
+  PSCmd := '$ws = New-Object -ComObject WScript.Shell; '
+    + '$s = $ws.CreateShortcut(''' + ShortcutPath + '''); '
+    + '$s.TargetPath = ''' + TargetExe + '''; '
+    + '$s.Arguments = ''' + Params + '''; '
+    + '$s.WorkingDirectory = ''' + WorkDir + '''; '
+    + '$s.Description = ''' + Description + '''; '
+    + '$s.Save()';
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PSCmd + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  HermesParams, OpenClawParams, UserHome: String;
 begin
   if CurStep = ssPostInstall then begin
     RunInstallScripts;
 
-    // Create desktop shortcuts based on selection
+    // Inno Setup does not expose {userprofile} as a path constant when the
+    // installer runs elevated (PrivilegesRequired=admin), so resolve the
+    // home directory via the USERPROFILE environment variable instead.
+    UserHome := GetEnv('USERPROFILE');
+
+    // Create desktop and start menu shortcuts based on selection
     if HermesCheckbox.Checked then begin
-      CreateShellLink(
+      HermesParams := '';
+      CreateShortcutViaPS(
         ExpandConstant('{userdesktop}\Hermes Agent.lnk'),
-        '', 'cmd.exe', '/k hermes',
-        ExpandConstant('{userprofile}'), 'Hermes Agent', 0, SW_SHOWNORMAL);
-      CreateShellLink(
+        ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd'), HermesParams,
+        UserHome, 'Hermes Agent');
+      CreateShortcutViaPS(
         ExpandConstant('{group}\Hermes Agent.lnk'),
-        '', 'cmd.exe', '/k hermes',
-        ExpandConstant('{userprofile}'), 'Hermes Agent', 0, SW_SHOWNORMAL);
+        ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd'), HermesParams,
+        UserHome, 'Hermes Agent');
     end;
     if OpenClawCheckbox.Checked then begin
-      CreateShellLink(
+      OpenClawParams := 'gateway --verbose';
+      CreateShortcutViaPS(
         ExpandConstant('{userdesktop}\OpenClaw.lnk'),
-        '', 'cmd.exe', '/k openclaw gateway --verbose',
-        ExpandConstant('{userprofile}'), 'OpenClaw Gateway', 0, SW_SHOWNORMAL);
-      CreateShellLink(
+        ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd'), OpenClawParams,
+        UserHome, 'OpenClaw Gateway');
+      CreateShortcutViaPS(
         ExpandConstant('{group}\OpenClaw.lnk'),
-        '', 'cmd.exe', '/k openclaw gateway --verbose',
-        ExpandConstant('{userprofile}'), 'OpenClaw Gateway', 0, SW_SHOWNORMAL);
+        ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd'), OpenClawParams,
+        UserHome, 'OpenClaw Gateway');
     end;
   end;
 end;

@@ -1,64 +1,48 @@
-# install-hermes.ps1 — Clone and set up Hermes Agent
-param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\hermes-agent"
-)
+# install-hermes.ps1 - Install Hermes Agent inside WSL2 using the official installer.
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\wsl-common.ps1"
+
+$logPath = Start-InstallLog -Name "install-hermes"
+trap {
+    Write-Host ""
+    Write-Host "[!] Installation failed. Full log: $logPath" -ForegroundColor Red
+    Stop-InstallLog
+    break
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Installing Hermes Agent" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$HermesConfig = "$env:USERPROFILE\.hermes"
-
-if (Test-Path "$InstallDir\.git") {
-    Write-Host "[*] Updating existing installation..." -ForegroundColor Cyan
-    Push-Location $InstallDir
-    git stash -q 2>$null
-    git pull -q origin main
-    Pop-Location
-} else {
-    Write-Host "[*] Cloning Hermes Agent..." -ForegroundColor Cyan
-    git clone -q https://github.com/NousResearch/hermes-agent.git $InstallDir
+$distro = Assert-Wsl2Ready
+Write-Ok "Running installer commands inside WSL2 distro '$($distro.Name)'"
+if (Test-IsChinaRegion) {
+    Write-Ok "Detected China network — using domestic mirrors for uv / pip / npm"
 }
+$appRoot = Get-AgentPackRoot
+$reposDir = Join-Path $appRoot "repos\hermes-agent"
+$reposDirWsl = Convert-WindowsPathToWslPath -Distro $distro.Name -WindowsPath $reposDir
 
-Push-Location $InstallDir
+# The bundled repo contains the official scripts/install.sh which handles
+# all dependency detection (uv, Python, git, Node.js), venv creation,
+# pip install, PATH setup, and config templating.
+# We pass --skip-setup so Agent Pack's own LLM configuration step runs instead.
+$mirrorPreamble = Get-CnMirrorBashPreamble
+$command = @"
+set -euo pipefail
+$mirrorPreamble
+target_dir="`$HOME/.hermes/hermes-agent"
+if [ -d "`$target_dir" ]; then
+    rm -rf "`$target_dir"
+fi
+mkdir -p "`$(dirname "`$target_dir")"
+cp -a "$reposDirWsl" "`$target_dir"
+bash "`$target_dir/scripts/install.sh" --skip-setup --dir "`$target_dir"
+"@
 
-Write-Host "[*] Creating virtual environment..." -ForegroundColor Cyan
-try {
-    uv venv venv --python 3.11
-} catch {
-    python -m venv venv
-}
+Invoke-WslCommand -Distro $distro.Name -Command $command
+New-WslCommandWrappers -Name "hermes" -Distro $distro.Name -LinuxCommand 'hermes "$@"'
 
-Write-Host "[*] Installing dependencies (this may take a few minutes)..." -ForegroundColor Cyan
-& "$InstallDir\venv\Scripts\activate.ps1"
-try {
-    uv pip install -e ".[all]"
-} catch {
-    pip install -e ".[all]"
-}
-deactivate
-
-Pop-Location
-
-# Create wrapper batch file
-$wrapperDir = "$env:LOCALAPPDATA\AgentPack\bin"
-New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
-@"
-@echo off
-call "$InstallDir\venv\Scripts\activate.bat"
-python -m hermes %*
-"@ | Set-Content "$wrapperDir\hermes.cmd" -Encoding UTF8
-
-# Add to user PATH
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$wrapperDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$wrapperDir;$userPath", "User")
-}
-
-# Create config directory
-New-Item -ItemType Directory -Path $HermesConfig -Force | Out-Null
-
-Write-Host "[OK] Hermes Agent installed." -ForegroundColor Green
+Stop-InstallLog

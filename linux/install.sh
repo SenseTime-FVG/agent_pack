@@ -19,11 +19,9 @@ if [ ! -d "$LIB_DIR" ]; then
 fi
 
 # Source library functions
-source "$LIB_DIR/detect-deps.sh"
 source "$LIB_DIR/install-hermes.sh"
 source "$LIB_DIR/install-openclaw.sh"
 source "$LIB_DIR/configure-llm.sh"
-source "$LIB_DIR/install-skills.sh"
 
 echo ""
 echo "========================================"
@@ -52,36 +50,9 @@ echo ""
 echo "Selected: ${SELECTED_PRODUCTS[*]}"
 echo ""
 
-# ---- Step 2: Detect & Install Dependencies ----
-echo "========================================"
-echo "  Checking Dependencies"
-echo "========================================"
-
-detect_distro
-echo "[*] Detected distro: $DISTRO_ID"
-
-ensure_git
-
-NEED_PYTHON=false
-NEED_NODE=false
-for prod in "${SELECTED_PRODUCTS[@]}"; do
-    case "$prod" in
-        hermes) NEED_PYTHON=true ;;
-        openclaw) NEED_NODE=true ;;
-    esac
-done
-
-if [ "$NEED_PYTHON" = true ]; then
-    ensure_python
-    ensure_uv
-    ensure_build_tools
-fi
-
-if [ "$NEED_NODE" = true ]; then
-    ensure_node
-fi
-
-# ---- Step 3: Install Products ----
+# ---- Step 2: Install Products ----
+# Both Hermes and OpenClaw delegate to their official install.sh scripts,
+# which handle all dependency detection and installation internally.
 for prod in "${SELECTED_PRODUCTS[@]}"; do
     case "$prod" in
         hermes) install_hermes ;;
@@ -89,11 +60,8 @@ for prod in "${SELECTED_PRODUCTS[@]}"; do
     esac
 done
 
-# ---- Step 4: Configure LLM ----
+# ---- Step 3: Configure LLM ----
 configure_llm "${SELECTED_PRODUCTS[@]}"
-
-# ---- Step 5: Install Skills ----
-install_skills "${SELECTED_PRODUCTS[@]}"
 
 # ---- Done ----
 echo ""
