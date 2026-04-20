@@ -38,7 +38,36 @@ install_openclaw() {
     fi
 
     echo "[*] Running openclaw install.sh (git --source-ready)..."
-    bash "$install_script" \
+    # Under WSL, /mnt/<drive> paths are inherited from Windows PATH and every
+    # file shows up as executable.  openclaw's install.sh uses `command -v
+    # corepack` to detect a corepack binary; if the user has a Windows-side
+    # corepack on PATH (e.g. /mnt/d/tools/corepack) it wins, and the Linux
+    # kernel can't execute a PE binary, aborting the install with:
+    #   cannot execute: required file not found
+    # Strip /mnt/* entries from PATH for just this sub-shell to keep the
+    # lookup Linux-only.  We only do this under WSL so native Linux installs
+    # aren't affected.
+    local child_path="$PATH"
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        child_path="$(printf '%s\n' "$PATH" | tr ':' '\n' | grep -v '^/mnt/' | paste -sd:)"
+    fi
+
+    # When hermes installs first it sets npm's global prefix to
+    # $HERMES_HOME/node (e.g. /root/.hermes/node).  openclaw then runs
+    # `npm install -g pnpm@10` which lands in $prefix/bin — but that dir
+    # isn't on PATH, so the subsequent `command -v pnpm` check fails and
+    # openclaw aborts with "pnpm installation failed" even though the
+    # install succeeded.  Prepend the current global prefix's bin/ to PATH
+    # so the follow-up lookup finds pnpm regardless of where hermes put it.
+    local npm_prefix=""
+    if command -v npm >/dev/null 2>&1; then
+        npm_prefix="$(PATH="$child_path" npm config get prefix 2>/dev/null || true)"
+    fi
+    if [ -n "$npm_prefix" ] && [ -d "$npm_prefix/bin" ]; then
+        child_path="$npm_prefix/bin:$child_path"
+    fi
+
+    PATH="$child_path" bash "$install_script" \
         --install-method git \
         --source-ready \
         --git-dir "$OPENCLAW_INSTALL_DIR" \

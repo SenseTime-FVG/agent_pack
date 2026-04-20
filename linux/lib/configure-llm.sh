@@ -88,14 +88,84 @@ configure_llm() {
     for prod in "${products[@]}"; do
         case "$prod" in
             hermes)
+                # Hermes config layout:
+                #   ~/.hermes/config.yaml — structured template (model.provider,
+                #     model.default, model.base_url).  Hermes install.sh already
+                #     seeded this from cli-config.yaml.example; we only edit
+                #     the three keys in place so the rest of the template
+                #     (comments, unrelated sections) survives.
+                #   ~/.hermes/.env        — API keys, picked up at runtime.
+                # Previously we wrote a flat top-level YAML here, which hermes
+                # couldn't parse — the agent fell back to its auto-detect path
+                # with no credentials.
                 mkdir -p "$HOME/.hermes"
-                cat > "$HOME/.hermes/config.yaml" << YAML
-provider: $provider
-model: $model
-api_key: $api_key
-base_url: $base_url
-YAML
-                echo "[OK] Hermes config written to ~/.hermes/config.yaml"
+
+                local env_key
+                case "$provider" in
+                    openrouter) env_key="OPENROUTER_API_KEY" ;;
+                    openai)     env_key="OPENAI_API_KEY"     ;;
+                    anthropic)  env_key="ANTHROPIC_API_KEY"  ;;
+                    custom)     env_key="OPENAI_API_KEY"     ;;
+                    *)          env_key="OPENROUTER_API_KEY" ;;
+                esac
+
+                local env_file="$HOME/.hermes/.env"
+                touch "$env_file"
+                chmod 600 "$env_file" 2>/dev/null || true
+                # Drop prior entries for the keys we're about to write so
+                # re-running the installer doesn't leave stale duplicates.
+                local keys_to_replace="$env_key"
+                if [ "$provider" = "custom" ]; then
+                    keys_to_replace="$env_key OPENAI_BASE_URL"
+                fi
+                for k in $keys_to_replace; do
+                    sed -i.bak "/^${k}=/d" "$env_file" 2>/dev/null || true
+                done
+                rm -f "$env_file.bak" 2>/dev/null || true
+                printf '%s=%s\n' "$env_key" "$api_key" >> "$env_file"
+                if [ "$provider" = "custom" ]; then
+                    printf 'OPENAI_BASE_URL=%s\n' "$base_url" >> "$env_file"
+                fi
+
+                # Patch config.yaml's model block in place.  The template
+                # uses 2-space indent under `model:`; we target those keys
+                # specifically to avoid touching identically-named keys in
+                # other (commented) sections.
+                local cfg="$HOME/.hermes/config.yaml"
+                if [ -f "$cfg" ]; then
+                    python3 - "$cfg" "$provider" "$model" "$base_url" << 'PY'
+import re, sys
+path, provider, model, base_url = sys.argv[1:5]
+with open(path, 'r', encoding='utf-8') as f:
+    text = f.read()
+
+def patch_key(src, key, value):
+    # Replace `  <key>: "..."` only on its first occurrence inside the
+    # top-level `model:` block, leaving comments and other sections alone.
+    pattern = re.compile(
+        r'(?m)^(?P<indent>  )(?P<key>' + re.escape(key) + r')\s*:\s*(?P<val>.*)$'
+    )
+    replaced = {'done': False}
+    def repl(m):
+        if replaced['done']:
+            return m.group(0)
+        replaced['done'] = True
+        return f'{m.group("indent")}{m.group("key")}: "{value}"'
+    new = pattern.sub(repl, src, count=1)
+    return new
+
+text = patch_key(text, 'default', model)
+text = patch_key(text, 'provider', provider)
+text = patch_key(text, 'base_url', base_url)
+
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(text)
+PY
+                    echo "[OK] Hermes config patched at ~/.hermes/config.yaml"
+                else
+                    echo "[!] ~/.hermes/config.yaml not found — API key saved to .env but model/provider not set."
+                fi
+                echo "[OK] Hermes API key saved to ~/.hermes/.env ($env_key)"
                 ;;
             openclaw)
                 mkdir -p "$HOME/.openclaw"
