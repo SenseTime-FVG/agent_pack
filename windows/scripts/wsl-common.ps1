@@ -23,7 +23,7 @@ function Start-InstallLog {
     try {
         Start-Transcript -Path $logPath -Force | Out-Null
     } catch {
-        Write-Warning "Could not start transcript at $logPath: $_"
+        Write-Warning "Could not start transcript at ${logPath}: $_"
     }
     Write-Host "[log] Writing install log to: $logPath" -ForegroundColor DarkGray
     return $logPath
