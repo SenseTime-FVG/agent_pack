@@ -31,6 +31,26 @@ source "$LINUX_LIB/install-hermes.sh"
 source "$LINUX_LIB/install-openclaw.sh"
 source "$LINUX_LIB/configure-llm.sh"
 
+# Override terminal opener BEFORE sourcing launch-products.sh so the default
+# Linux implementation isn't defined.  macOS uses Terminal.app via osascript.
+_ap_open_terminal() {
+    local title="$1"; shift
+    local cmd="$*"
+    local wrapped="$cmd; echo; echo '[agent-pack] $title exited.'; exec bash"
+    # Escape double quotes and backslashes for embedding in an AppleScript
+    # string literal.
+    local escaped="${wrapped//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    osascript <<OSA >/dev/null 2>&1
+tell application "Terminal"
+    activate
+    do script "$escaped"
+end tell
+OSA
+    return $?
+}
+source "$LINUX_LIB/launch-products.sh"
+
 # Ensure brew is in PATH (Apple Silicon)
 if [ -f /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -104,6 +124,10 @@ for prod in "${SELECTED_PRODUCTS[@]}"; do
         openclaw) echo "  OpenClaw:      Run 'openclaw gateway' to start the gateway" ;;
     esac
 done
+
+# Launch each selected product in its own Terminal.app window.
+launch_products "${SELECTED_PRODUCTS[@]}"
+
 echo ""
 echo "Press Enter to close this window."
 read -r

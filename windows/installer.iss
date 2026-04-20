@@ -564,9 +564,31 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+// Spawn `cmd.exe /k <CmdExe> <Args>` in a brand-new, detached console window
+// with the given title.  Used end-of-install to open one window per product
+// (Hermes REPL + OpenClaw gateway) so the user can start using them without
+// manually running the wrappers.  Mirrors the `launch_products` bash helper
+// used on Linux / macOS.
+//
+// `start` is a cmd.exe builtin, not an executable — we invoke it via
+// `cmd.exe /c start ...`.  The outer cmd exits immediately; the `start`
+// spawns a fresh console that runs `cmd.exe /k` so the window stays open
+// after the product exits (useful for reading final output / errors).
+procedure LaunchInNewConsole(const Title, CmdExe, Args: String);
+var
+  StartArgs: String;
+  ResultCode: Integer;
+begin
+  // Quoted empty "" after `start` would be taken as the window title, so we
+  // pass Title explicitly; CmdExe is quoted to survive spaces in the path.
+  StartArgs := '/c start "' + Title + '" cmd.exe /k ""' + CmdExe + '" ' + Args + '"';
+  Exec(ExpandConstant('{sys}\cmd.exe'), StartArgs, '', SW_SHOWNORMAL,
+    ewNoWait, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  HermesParams, OpenClawParams, UserHome: String;
+  HermesParams, OpenClawParams, UserHome, HermesCmd, OpenClawCmd: String;
 begin
   if CurStep = ssPostInstall then begin
     RunInstallScripts;
@@ -576,28 +598,36 @@ begin
     // home directory via the USERPROFILE environment variable instead.
     UserHome := GetEnv('USERPROFILE');
 
+    HermesCmd := ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd');
+    OpenClawCmd := ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd');
+
     // Create desktop and start menu shortcuts based on selection
     if HermesCheckbox.Checked then begin
       HermesParams := '';
       CreateShortcutViaPS(
         ExpandConstant('{userdesktop}\Hermes Agent.lnk'),
-        ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd'), HermesParams,
-        UserHome, 'Hermes Agent');
+        HermesCmd, HermesParams, UserHome, 'Hermes Agent');
       CreateShortcutViaPS(
         ExpandConstant('{group}\Hermes Agent.lnk'),
-        ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd'), HermesParams,
-        UserHome, 'Hermes Agent');
+        HermesCmd, HermesParams, UserHome, 'Hermes Agent');
     end;
     if OpenClawCheckbox.Checked then begin
       OpenClawParams := 'gateway --verbose';
       CreateShortcutViaPS(
         ExpandConstant('{userdesktop}\OpenClaw.lnk'),
-        ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd'), OpenClawParams,
-        UserHome, 'OpenClaw Gateway');
+        OpenClawCmd, OpenClawParams, UserHome, 'OpenClaw Gateway');
       CreateShortcutViaPS(
         ExpandConstant('{group}\OpenClaw.lnk'),
-        ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd'), OpenClawParams,
-        UserHome, 'OpenClaw Gateway');
+        OpenClawCmd, OpenClawParams, UserHome, 'OpenClaw Gateway');
+    end;
+
+    // Open one console window per selected product so the user lands on a
+    // running Hermes REPL + OpenClaw gateway immediately after install.
+    if HermesCheckbox.Checked then begin
+      LaunchInNewConsole('Hermes Agent', HermesCmd, '');
+    end;
+    if OpenClawCheckbox.Checked then begin
+      LaunchInNewConsole('OpenClaw Gateway', OpenClawCmd, 'gateway --verbose');
     end;
   end;
 end;

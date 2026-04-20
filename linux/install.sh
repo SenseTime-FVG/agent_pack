@@ -48,6 +48,7 @@ fi
 source "$LIB_DIR/install-hermes.sh"
 source "$LIB_DIR/install-openclaw.sh"
 source "$LIB_DIR/configure-llm.sh"
+source "$LIB_DIR/launch-products.sh"
 
 # CN-region environment setup: mirror env vars + TUNA apt + pre-installed uv.
 # Driven by AGENTPACK_CN=1 or a CN network probe inside cn-env.sh's caller.
@@ -147,3 +148,8 @@ done
 echo ""
 echo "  You may need to restart your shell or run: source ~/.bashrc"
 echo ""
+
+# ---- Step 4: Launch Installed Products ----
+# Open each installed product in its own terminal window so the user can
+# start using them immediately without re-sourcing their shell.
+launch_products "${SELECTED_PRODUCTS[@]}"
