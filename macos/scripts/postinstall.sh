@@ -143,15 +143,29 @@ _run_in_this_window_then_replace() {
     exec bash -lc "$cmd"
 }
 
-# Decide which agent takes this window vs. the new tab.
+# Decide which agent takes this window vs. the new tab.  When openclaw is
+# present, schedule a delayed `openclaw dashboard` call so the control UI
+# opens in the user's browser shortly after the gateway starts.
 _has() { for p in "${SELECTED_PRODUCTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
+
+_schedule_dashboard() {
+    # Run through a login shell so openclaw's install dir (e.g. ~/.local/bin
+    # or the homebrew prefix) is on PATH — this script's own shell may have
+    # been invoked from the installer with a stripped environment.
+    ( sleep 3 && bash -lc 'openclaw dashboard >/dev/null 2>&1' ) &
+    disown 2>/dev/null || true
+}
 
 if _has openclaw && _has hermes; then
     _open_terminal_tab 'openclaw gateway --verbose' 'OpenClaw Gateway'
+    _schedule_dashboard
+    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     _run_in_this_window_then_replace 'hermes' 'Hermes Agent'
 elif _has hermes; then
     _run_in_this_window_then_replace 'hermes' 'Hermes Agent'
 elif _has openclaw; then
+    _schedule_dashboard
+    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     _run_in_this_window_then_replace 'openclaw gateway --verbose' 'OpenClaw Gateway'
 fi
 SETUP_SCRIPT

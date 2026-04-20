@@ -83,10 +83,39 @@ New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $markerDir "openclaw-installed.marker") `
     -Value ([DateTime]::UtcNow.ToString("o")) -Encoding ASCII
 
+# Schedule `openclaw dashboard` in a detached Start-Process so the control
+# UI opens in the user's default Windows browser a few seconds after the
+# gateway binds.  We call it with --no-open (gateway runs inside WSL, where
+# `wslview` isn't installed by default) to just get the URL, then use
+# Start-Process on the Windows side to open the real browser.
+$dashboardScript = @'
+param([string]$Script)
+Start-Sleep -Seconds 3
+try {
+    $out = & wsl.exe -- bash -lc 'openclaw dashboard --no-open 2>/dev/null' 2>$null
+    $url = $null
+    foreach ($line in $out) {
+        if ($line -match 'Dashboard URL:\s*(\S+)') {
+            $url = $Matches[1]
+            break
+        }
+    }
+    if ($url) {
+        Start-Process $url
+    }
+} catch { }
+'@
+$tmpPs = [System.IO.Path]::GetTempFileName() + ".ps1"
+Set-Content -LiteralPath $tmpPs -Value $dashboardScript -Encoding UTF8
+Start-Process -FilePath 'powershell.exe' `
+    -ArgumentList '-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',$tmpPs `
+    -WindowStyle Hidden | Out-Null
+
 # Hand the current console over to `openclaw gateway --verbose`.  We don't
 # return — Inno Setup spawned us with ewNoWait, so this window is ours to
 # keep.  The user Ctrl-C's the gateway themselves when they're done.
 Write-Host ""
 Write-Host "[OK] OpenClaw installed. Starting gateway in this window..." -ForegroundColor Green
+Write-Host "[*] Opening OpenClaw dashboard in your browser shortly..." -ForegroundColor Cyan
 Write-Host ""
 & wsl.exe -- bash -lc 'openclaw gateway --verbose'

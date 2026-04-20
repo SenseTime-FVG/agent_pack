@@ -153,7 +153,36 @@ echo ""
 # selected, background `openclaw gateway` (logs to ~/.openclaw/gateway.log)
 # and exec hermes in the foreground — a gateway is a server, a hermes REPL
 # needs stdin.  When only one is selected, exec it directly.
+#
+# When openclaw is among the selected products, also trigger
+# `openclaw dashboard` a few seconds later to open the control UI in the
+# user's browser.  It reads the same config the gateway just started with,
+# so URL + token match.
+#
+# PATH augmentation: hermes installs to $HERMES_HOME/node/bin and openclaw's
+# CLI wrapper lands in ~/.local/bin.  Neither is guaranteed to be on the
+# current shell's PATH at this point — it usually only picks them up after
+# the user re-sources ~/.bashrc.  Add them explicitly so the exec below
+# works without a shell restart.
 _ap_has() { for p in "${SELECTED_PRODUCTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
+
+_ap_augment_path() {
+    local add
+    for add in "$HOME/.local/bin" "$HOME/.hermes/node/bin" "$HERMES_INSTALL_DIR/node/bin"; do
+        [ -z "$add" ] && continue
+        case ":$PATH:" in *":$add:"*) ;; *) [ -d "$add" ] && PATH="$add:$PATH" ;; esac
+    done
+    export PATH
+}
+
+_ap_schedule_dashboard() {
+    # Give the gateway a few seconds to bind before opening the browser
+    # (dashboard itself doesn't probe, so we sleep for the user's sake).
+    ( sleep 3 && openclaw dashboard >/dev/null 2>&1 ) &
+    disown 2>/dev/null || true
+}
+
+_ap_augment_path
 
 if _ap_has openclaw && _ap_has hermes; then
     _openclaw_log="$HOME/.openclaw/gateway.log"
@@ -161,12 +190,16 @@ if _ap_has openclaw && _ap_has hermes; then
     echo "[*] Starting openclaw gateway in the background (log: $_openclaw_log)..."
     nohup openclaw gateway --verbose >"$_openclaw_log" 2>&1 &
     disown 2>/dev/null || true
+    _ap_schedule_dashboard
+    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     echo "[*] Starting hermes in this window..."
     exec hermes
 elif _ap_has hermes; then
     echo "[*] Starting hermes in this window..."
     exec hermes
 elif _ap_has openclaw; then
+    _ap_schedule_dashboard
+    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     echo "[*] Starting openclaw gateway in this window..."
     exec openclaw gateway --verbose
 fi
