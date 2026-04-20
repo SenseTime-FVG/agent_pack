@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch a fresh agent_pack clone and copy one subdirectory into place.
+# Fetch agent_pack and copy one subdirectory into place.
 #
 # Used by linux/lib/install-*.sh and by windows/scripts/install-*.ps1
 # (invoked inside WSL).  Honors CN mirrors from config/defaults.json when
@@ -13,8 +13,12 @@
 #
 # Behavior:
 #   - Wipes $target_dir if it already exists.
-#   - Tries direct clone first; on failure, retries through each CN mirror
-#     listed in defaults.json.
+#   - If $AGENT_PACK_CACHE_DIR is set and contains <subdir>, copies directly
+#     from the cache — no clone.  Orchestrators (linux install.sh, macOS
+#     setup-interactive.sh, windows prefetch-agent-pack.ps1) set this once so
+#     installing Hermes + OpenClaw in the same session shares one clone.
+#   - Otherwise: tries direct clone first; on failure, retries through each
+#     CN mirror listed in defaults.json.
 #   - Removes the embedded .git after copying so install.sh treats the tree as
 #     source-only (no accidental git pull).
 
@@ -47,6 +51,34 @@ MIRRORS_RAW="$(_json_get "'\n'.join(data['agent_pack'].get('cn_mirrors', []))")"
 if [ -z "$REPO_URL" ] || [ -z "$BRANCH" ]; then
     echo "[!] Could not read agent_pack.repo_url / branch from defaults.json" >&2
     exit 1
+fi
+
+_copy_from_source() {
+    # _copy_from_source <src_subdir_root> — copy $1/$SUBDIR into $TARGET.
+    local src_root="$1"
+    local src="$src_root/$SUBDIR"
+    if [ ! -d "$src" ]; then
+        echo "[!] Subdirectory '$SUBDIR' not found in $src_root" >&2
+        return 1
+    fi
+    if [ -d "$TARGET" ]; then
+        rm -rf "$TARGET"
+    fi
+    mkdir -p "$(dirname "$TARGET")"
+    cp -a "$src" "$TARGET"
+    # Vendored copies don't carry .git, but belt-and-suspenders: make sure the
+    # downstream install.sh can't accidentally treat the copy as a git repo.
+    rm -rf "$TARGET/.git"
+    echo "[OK] agent_pack/$SUBDIR copied to $TARGET"
+}
+
+# Fast path: orchestrator already cloned agent_pack once (linux install.sh
+# bootstrap, macOS setup-interactive.sh, windows prefetch-agent-pack.ps1) and
+# pointed us at it via $AGENT_PACK_CACHE_DIR.  Skip the clone entirely.
+if [ -n "${AGENT_PACK_CACHE_DIR:-}" ] && [ -d "${AGENT_PACK_CACHE_DIR}/$SUBDIR" ]; then
+    echo "[*] Using cached agent_pack at $AGENT_PACK_CACHE_DIR"
+    _copy_from_source "$AGENT_PACK_CACHE_DIR"
+    exit $?
 fi
 
 _detect_cn() {
@@ -102,21 +134,4 @@ if [ $CLONE_OK -ne 1 ]; then
     exit 1
 fi
 
-SRC="$TMPDIR_CLONE/agent_pack/$SUBDIR"
-if [ ! -d "$SRC" ]; then
-    echo "[!] Subdirectory '$SUBDIR' not found in cloned agent_pack." >&2
-    exit 1
-fi
-
-# Replace the target directory atomically-ish.
-if [ -d "$TARGET" ]; then
-    rm -rf "$TARGET"
-fi
-mkdir -p "$(dirname "$TARGET")"
-cp -a "$SRC" "$TARGET"
-
-# We vendored these without .git, but belt-and-suspenders: make sure the
-# downstream install.sh can't accidentally treat the copy as a git repo.
-rm -rf "$TARGET/.git"
-
-echo "[OK] agent_pack/$SUBDIR copied to $TARGET"
+_copy_from_source "$TMPDIR_CLONE/agent_pack"

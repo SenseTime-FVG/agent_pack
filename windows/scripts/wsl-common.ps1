@@ -130,15 +130,18 @@ function Assert-Wsl2Ready {
 
 # Invoke a bash command inside the user's default WSL distro.  The command
 # is passed through base64 so embedded quotes / newlines don't need shell
-# escaping on the wsl.exe command line.
+# escaping.  The base64 blob is streamed via stdin rather than the wsl.exe
+# command line so we don't hit the Windows 32,767-char CreateProcess cap —
+# PowerShell 5.1 raises IndexOutOfRangeException ("索引超出了数组界限")
+# when that cap is exceeded, which blocks installs whose bash body + CN
+# mirror preamble pushes the base64 payload past the limit.
 function Invoke-WslCommand {
     param([Parameter(Mandatory)][string]$Command)
 
     $normalizedCommand = $Command -replace "`r`n?", "`n"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($normalizedCommand))
-    $bashCommand = "printf '%s' '$encodedCommand' | base64 -d | bash"
 
-    & wsl.exe -- bash -lc $bashCommand
+    $encodedCommand | & wsl.exe -- bash -lc 'base64 -d | bash'
     if ($LASTEXITCODE -ne 0) {
         throw "WSL command failed in default distro with exit code $LASTEXITCODE."
     }

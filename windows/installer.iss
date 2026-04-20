@@ -494,6 +494,14 @@ begin
     'Typical fix: open PowerShell as Administrator and run `wsl --install` (then reboot).',
     GetAgentPackLogPath('install-deps'));
 
+  // Clone agent_pack once up front so install-hermes.ps1 and
+  // install-openclaw.ps1 can share a single source tree instead of each
+  // doing its own clone (halving network traffic when both are selected).
+  ExecVisiblePwshWithRetry(
+    ScriptsDir + '\prefetch-agent-pack.ps1',
+    'Failed to pre-fetch agent_pack sources inside WSL2.',
+    GetAgentPackLogPath('prefetch-agent-pack'));
+
   if HermesCheckbox.Checked then begin
     ExecVisiblePwshWithRetry(
       ScriptsDir + '\install-hermes.ps1',

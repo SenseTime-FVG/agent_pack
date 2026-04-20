@@ -68,6 +68,16 @@ case "$product_choice" in
     *) SELECTED_PRODUCTS=("hermes") ;;
 esac
 
+# Clone agent_pack once here so install_hermes + install_openclaw copy from
+# a shared cache instead of each cloning the repo independently.
+AGENT_PACK_CLONE_ROOT="$(mktemp -d)/agent_pack"
+echo "[*] Pre-fetching agent_pack (shared across product installs)..."
+if ! bash "$SHARED_DIR/prefetch-agent-pack.sh" "$AGENT_PACK_CLONE_ROOT"; then
+    echo "[!] Failed to pre-fetch agent_pack."
+    exit 1
+fi
+export AGENT_PACK_CACHE_DIR="$AGENT_PACK_CLONE_ROOT"
+
 # Install products
 # Both Hermes and OpenClaw delegate to their official install.sh scripts,
 # which handle all dependency detection and installation internally.

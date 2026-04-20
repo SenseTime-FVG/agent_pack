@@ -8,6 +8,7 @@ set -euo pipefail
 
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$INSTALLER_DIR/lib"
+AGENT_PACK_CLONE_ROOT=""
 
 # If running via curl | bash, download the full package first.
 # This bootstrap can't read config/defaults.json yet (we haven't fetched it),
@@ -38,6 +39,9 @@ if [ ! -d "$LIB_DIR" ]; then
     fi
     INSTALLER_DIR="$TMPDIR/agent-pack/linux"
     LIB_DIR="$INSTALLER_DIR/lib"
+    # Bootstrap clone doubles as the shared cache: fetch-agent-pack.sh will
+    # copy repos/<agent> straight from here instead of cloning again.
+    AGENT_PACK_CLONE_ROOT="$TMPDIR/agent-pack"
 fi
 
 # Source library functions
@@ -67,6 +71,20 @@ if [ -f "$_AP_SHARED_DIR/cn-env.sh" ]; then
         apply_cn_env
     fi
 fi
+
+# If the bootstrap didn't already provide a clone (i.e. user ran install.sh
+# from a local checkout), fetch once now so both install_hermes and
+# install_openclaw can share the same source tree.  Runs after CN detection
+# so prefetch itself honors mirrors.
+if [ -z "$AGENT_PACK_CLONE_ROOT" ]; then
+    AGENT_PACK_CLONE_ROOT="$(mktemp -d)/agent_pack"
+    echo "[*] Pre-fetching agent_pack (shared across product installs)..."
+    if ! bash "$_AP_SHARED_DIR/prefetch-agent-pack.sh" "$AGENT_PACK_CLONE_ROOT"; then
+        echo "[!] Failed to pre-fetch agent_pack." >&2
+        exit 1
+    fi
+fi
+export AGENT_PACK_CACHE_DIR="$AGENT_PACK_CLONE_ROOT"
 
 echo ""
 echo "========================================"

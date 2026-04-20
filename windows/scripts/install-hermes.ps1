@@ -40,10 +40,13 @@ $mirrorPreamble = Get-CnMirrorBashPreamble
 $cnFlag = if ($isChina) { "1" } else { "0" }
 
 # Source the linux library and call install_hermes.  AGENTPACK_CN tells the
-# shared fetch helper whether to try CN mirrors.
+# shared fetch helper whether to try CN mirrors; AGENT_PACK_CACHE_DIR lets
+# fetch-agent-pack.sh copy from the shared clone created by
+# prefetch-agent-pack.ps1 instead of cloning again.
 $command = @"
 set -euo pipefail
 export AGENTPACK_CN='$cnFlag'
+export AGENT_PACK_CACHE_DIR="`$HOME/.agent-pack/.cache/agent_pack"
 $mirrorPreamble
 . "$linuxLibDirWsl/install-hermes.sh"
 install_hermes

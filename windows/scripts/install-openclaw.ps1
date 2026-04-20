@@ -42,6 +42,7 @@ $cnFlag = if ($isChina) { "1" } else { "0" }
 $command = @"
 set -euo pipefail
 export AGENTPACK_CN='$cnFlag'
+export AGENT_PACK_CACHE_DIR="`$HOME/.agent-pack/.cache/agent_pack"
 $mirrorPreamble
 . "$linuxLibDirWsl/install-openclaw.sh"
 install_openclaw
