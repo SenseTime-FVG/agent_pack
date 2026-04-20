@@ -31,26 +31,6 @@ source "$LINUX_LIB/install-hermes.sh"
 source "$LINUX_LIB/install-openclaw.sh"
 source "$LINUX_LIB/configure-llm.sh"
 
-# Override terminal opener BEFORE sourcing launch-products.sh so the default
-# Linux implementation isn't defined.  macOS uses Terminal.app via osascript.
-_ap_open_terminal() {
-    local title="$1"; shift
-    local cmd="$*"
-    local wrapped="$cmd; echo; echo '[agent-pack] $title exited.'; exec bash"
-    # Escape double quotes and backslashes for embedding in an AppleScript
-    # string literal.
-    local escaped="${wrapped//\\/\\\\}"
-    escaped="${escaped//\"/\\\"}"
-    osascript <<OSA >/dev/null 2>&1
-tell application "Terminal"
-    activate
-    do script "$escaped"
-end tell
-OSA
-    return $?
-}
-source "$LINUX_LIB/launch-products.sh"
-
 # Ensure brew is in PATH (Apple Silicon)
 if [ -f /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -124,13 +104,56 @@ for prod in "${SELECTED_PRODUCTS[@]}"; do
         openclaw) echo "  OpenClaw:      Run 'openclaw gateway' to start the gateway" ;;
     esac
 done
-
-# Launch each selected product in its own Terminal.app window.
-launch_products "${SELECTED_PRODUCTS[@]}"
-
 echo ""
-echo "Press Enter to close this window."
-read -r
+
+# End-of-install: take over the current Terminal window with one agent, and
+# if a second one was selected, open a second Terminal tab for it.  We do NOT
+# spawn fresh windows — the goal is that the user keeps using the install
+# window, now running the agent, instead of ending up with extra sessions.
+#
+# Choice of which runs where: Hermes (interactive REPL) lives in this
+# window because that's the user's current focus; OpenClaw gateway
+# (long-running server, mostly background) lives in the extra tab.
+_open_terminal_tab() {
+    local cmd="$1"
+    local title="$2"
+    # Run a login shell so PATH picks up brew + npm globals.  After the
+    # product exits, drop to an interactive shell so the window/tab stays
+    # open to read final output.
+    local wrapped="$cmd; echo; echo '[agent-pack] $title exited.'; exec bash -l"
+    local escaped="${wrapped//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    osascript <<OSA >/dev/null 2>&1
+tell application "Terminal"
+    activate
+    tell application "System Events" to keystroke "t" using {command down}
+    delay 0.3
+    do script "$escaped" in selected tab of the front window
+end tell
+OSA
+}
+
+_run_in_this_window_then_replace() {
+    # exec hands the current bash process over to the product; when the
+    # product exits, the window stays open because Terminal keeps a dead
+    # shell visible until the user closes the tab themselves.
+    local cmd="$1"
+    local title="$2"
+    echo "[*] Starting $title in this window..."
+    exec bash -lc "$cmd"
+}
+
+# Decide which agent takes this window vs. the new tab.
+_has() { for p in "${SELECTED_PRODUCTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
+
+if _has openclaw && _has hermes; then
+    _open_terminal_tab 'openclaw gateway --verbose' 'OpenClaw Gateway'
+    _run_in_this_window_then_replace 'hermes' 'Hermes Agent'
+elif _has hermes; then
+    _run_in_this_window_then_replace 'hermes' 'Hermes Agent'
+elif _has openclaw; then
+    _run_in_this_window_then_replace 'openclaw gateway --verbose' 'OpenClaw Gateway'
+fi
 SETUP_SCRIPT
 
 chmod +x "$INSTALL_DIR/setup-interactive.sh"

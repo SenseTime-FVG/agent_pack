@@ -24,6 +24,12 @@ trap {
     else { Write-Host "[log not found: $logPath]" }
     Write-Host "==================================================" -ForegroundColor DarkGray
     Stop-InstallLog
+    try {
+        $markerDir = Join-Path $env:LOCALAPPDATA "AgentPack\markers"
+        New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $markerDir "openclaw-failed.marker") `
+            -Value $logPath -Encoding ASCII
+    } catch { }
     Wait-ForKeyIfConsole
     exit 1
 }
@@ -69,3 +75,18 @@ Invoke-WslCommand -Command $command
 New-WslCommandWrappers -Name "openclaw" -LinuxCommand 'openclaw "$@"'
 
 Stop-InstallLog
+
+# Signal the installer that openclaw is installed, so CurStepChanged can stop
+# polling.  See windows/installer.iss RunInstallScripts for the reader.
+$markerDir = Join-Path $env:LOCALAPPDATA "AgentPack\markers"
+New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $markerDir "openclaw-installed.marker") `
+    -Value ([DateTime]::UtcNow.ToString("o")) -Encoding ASCII
+
+# Hand the current console over to `openclaw gateway --verbose`.  We don't
+# return — Inno Setup spawned us with ewNoWait, so this window is ours to
+# keep.  The user Ctrl-C's the gateway themselves when they're done.
+Write-Host ""
+Write-Host "[OK] OpenClaw installed. Starting gateway in this window..." -ForegroundColor Green
+Write-Host ""
+& wsl.exe -- bash -lc 'openclaw gateway --verbose'

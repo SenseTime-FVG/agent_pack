@@ -48,7 +48,6 @@ fi
 source "$LIB_DIR/install-hermes.sh"
 source "$LIB_DIR/install-openclaw.sh"
 source "$LIB_DIR/configure-llm.sh"
-source "$LIB_DIR/launch-products.sh"
 
 # CN-region environment setup: mirror env vars + TUNA apt + pre-installed uv.
 # Driven by AGENTPACK_CN=1 or a CN network probe inside cn-env.sh's caller.
@@ -149,7 +148,25 @@ echo ""
 echo "  You may need to restart your shell or run: source ~/.bashrc"
 echo ""
 
-# ---- Step 4: Launch Installed Products ----
-# Open each installed product in its own terminal window so the user can
-# start using them immediately without re-sourcing their shell.
-launch_products "${SELECTED_PRODUCTS[@]}"
+# ---- Step 4: Launch Installed Products In This Window ----
+# Take over this install session with the selected agent(s).  When both are
+# selected, background `openclaw gateway` (logs to ~/.openclaw/gateway.log)
+# and exec hermes in the foreground — a gateway is a server, a hermes REPL
+# needs stdin.  When only one is selected, exec it directly.
+_ap_has() { for p in "${SELECTED_PRODUCTS[@]}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
+
+if _ap_has openclaw && _ap_has hermes; then
+    _openclaw_log="$HOME/.openclaw/gateway.log"
+    mkdir -p "$(dirname "$_openclaw_log")"
+    echo "[*] Starting openclaw gateway in the background (log: $_openclaw_log)..."
+    nohup openclaw gateway --verbose >"$_openclaw_log" 2>&1 &
+    disown 2>/dev/null || true
+    echo "[*] Starting hermes in this window..."
+    exec hermes
+elif _ap_has hermes; then
+    echo "[*] Starting hermes in this window..."
+    exec hermes
+elif _ap_has openclaw; then
+    echo "[*] Starting openclaw gateway in this window..."
+    exec openclaw gateway --verbose
+fi

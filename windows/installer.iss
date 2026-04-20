@@ -508,12 +508,122 @@ begin
   Result := Args;
 end;
 
+function GetAgentPackMarkerDir: String;
+begin
+  Result := ExpandConstant('{localappdata}') + '\AgentPack\markers';
+end;
+
+function GetMarkerPath(const Name: String): String;
+begin
+  Result := GetAgentPackMarkerDir + '\' + Name;
+end;
+
+// Start a per-product install PowerShell script without waiting for it to
+// exit.  The PS script: (a) installs the product, (b) writes
+// <prod>-installed.marker, (c) execs the agent, taking over the console.
+// Because the PS1 never returns (it's hosting an interactive agent / long-
+// running server), we MUST use ewNoWait or Inno Setup would hang forever.
+procedure SpawnProductInstall(const ScriptPath, ExtraArgs: String);
+var
+  Params: String;
+  ResultCode: Integer;
+begin
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"';
+  if Trim(ExtraArgs) <> '' then begin
+    Params := Params + ' ' + ExtraArgs;
+  end;
+  Exec('powershell.exe', Params, '', SW_SHOW, ewNoWait, ResultCode);
+end;
+
+// Poll each selected product's marker directory until every product has
+// either an <prod>-installed.marker (success) or <prod>-failed.marker.
+// Returns True if all succeeded.  Shows install log + Retry/Cancel dialog
+// on any failure, mirroring ExecVisiblePwshWithRetry's old behavior.
+function WaitForProductMarkers(const WantHermes, WantOpenClaw: Boolean): Boolean;
+var
+  MarkerDir, HermesOk, HermesFail, OpenClawOk, OpenClawFail: String;
+  HermesDone, OpenClawDone, AllDone: Boolean;
+  TimeoutMs, Elapsed, SleepMs: Integer;
+  Response: Integer;
+  FailMsg, FailLog: String;
+  FailLogLines: TArrayOfString;
+begin
+  Result := False;
+  MarkerDir := GetAgentPackMarkerDir;
+  HermesOk    := MarkerDir + '\hermes-installed.marker';
+  HermesFail  := MarkerDir + '\hermes-failed.marker';
+  OpenClawOk  := MarkerDir + '\openclaw-installed.marker';
+  OpenClawFail:= MarkerDir + '\openclaw-failed.marker';
+
+  // 15 minutes — WSL first-boot + apt + npm installs can be slow.
+  TimeoutMs := 15 * 60 * 1000;
+  SleepMs := 1000;
+  Elapsed := 0;
+
+  while Elapsed < TimeoutMs do begin
+    HermesDone := (not WantHermes) or FileExists(HermesOk) or FileExists(HermesFail);
+    OpenClawDone := (not WantOpenClaw) or FileExists(OpenClawOk) or FileExists(OpenClawFail);
+    AllDone := HermesDone and OpenClawDone;
+
+    // Bail early if any failed — no point waiting out the timeout.
+    if WantHermes and FileExists(HermesFail) then begin
+      FailMsg := 'Hermes Agent installation failed.';
+      if LoadStringsFromFile(HermesFail, FailLogLines) and (GetArrayLength(FailLogLines) > 0) then begin
+        FailLog := FailLogLines[0];
+      end else begin
+        FailLog := GetAgentPackLogPath('install-hermes');
+      end;
+      Response := MsgBox(FailMsg + #13#10 + 'Log: ' + FailLog + #13#10#13#10 +
+        'Click Retry to re-run the installer script, Cancel to abort.',
+        mbError, MB_RETRYCANCEL);
+      if Response = IDCANCEL then Abort;
+      Exit; // caller retries
+    end;
+    if WantOpenClaw and FileExists(OpenClawFail) then begin
+      FailMsg := 'OpenClaw installation failed.';
+      if LoadStringsFromFile(OpenClawFail, FailLogLines) and (GetArrayLength(FailLogLines) > 0) then begin
+        FailLog := FailLogLines[0];
+      end else begin
+        FailLog := GetAgentPackLogPath('install-openclaw');
+      end;
+      Response := MsgBox(FailMsg + #13#10 + 'Log: ' + FailLog + #13#10#13#10 +
+        'Click Retry to re-run the installer script, Cancel to abort.',
+        mbError, MB_RETRYCANCEL);
+      if Response = IDCANCEL then Abort;
+      Exit;
+    end;
+
+    if AllDone then begin
+      Result := True;
+      Exit;
+    end;
+
+    Sleep(SleepMs);
+    Elapsed := Elapsed + SleepMs;
+    // Keep Inno Setup's wizard responsive (repaint, process messages).
+    WizardForm.Refresh;
+  end;
+
+  // Timed out — windows are probably still doing something; let the user
+  // decide whether to wait longer or bail.
+  Response := MsgBox(
+    'Timed out waiting for product installations to report success.' + #13#10 +
+    'The install windows may still be working.  Click Retry to keep waiting,' +
+    ' or Cancel to abort.',
+    mbError, MB_RETRYCANCEL);
+  if Response = IDCANCEL then Abort;
+  // Retry just re-enters the while loop by returning False to caller.
+end;
+
 procedure RunInstallScripts;
 var
   ScriptsDir, LlmArgs: String;
+  WantHermes, WantOpenClaw, AllDone: Boolean;
 begin
   ScriptsDir := ExpandConstant('{app}') + '\scripts';
   LlmArgs := BuildLlmArgs;
+  WantHermes := HermesCheckbox.Checked;
+  WantOpenClaw := OpenClawCheckbox.Checked;
 
   // Run WSL2 readiness check + agent_pack prefetch in a visible console so
   // the user can read the multi-line install guidance that Assert-Wsl2Ready
@@ -527,24 +637,32 @@ begin
     'Typical fix: open PowerShell as Administrator and run `wsl --install` (then reboot).',
     GetAgentPackLogPath('install-deps'));
 
-  // Per-product PS scripts run install_<prod> + apply_llm_config_for <prod>
-  // inside WSL so Windows shares the linux flow end-to-end.  LLM args are
-  // forwarded as script parameters; the PS script ignores them when ApiKey
-  // was left blank in the wizard.
-  if HermesCheckbox.Checked then begin
-    ExecVisiblePwshWithRetry(
-      ScriptsDir + '\install-hermes.ps1',
-      LlmArgs,
-      'Failed to install Hermes Agent inside WSL2.',
-      GetAgentPackLogPath('install-hermes'));
-  end;
+  // Clear any stale markers from a previous run so the poll loop doesn't
+  // return instantly on the first tick.
+  ForceDirectories(GetAgentPackMarkerDir);
+  DeleteFile(GetMarkerPath('hermes-installed.marker'));
+  DeleteFile(GetMarkerPath('hermes-failed.marker'));
+  DeleteFile(GetMarkerPath('openclaw-installed.marker'));
+  DeleteFile(GetMarkerPath('openclaw-failed.marker'));
 
-  if OpenClawCheckbox.Checked then begin
-    ExecVisiblePwshWithRetry(
-      ScriptsDir + '\install-openclaw.ps1',
-      LlmArgs,
-      'Failed to install OpenClaw inside WSL2.',
-      GetAgentPackLogPath('install-openclaw'));
+  // Per-product PS scripts run install_<prod> + apply_llm_config_for <prod>
+  // inside WSL, then exec the agent in the same console — so we start them
+  // with ewNoWait and use marker files to know when they're done installing.
+  // Retry loop: if any product fails, delete its markers, respawn, poll again.
+  while True do begin
+    if WantHermes and (not FileExists(GetMarkerPath('hermes-installed.marker'))) then begin
+      DeleteFile(GetMarkerPath('hermes-failed.marker'));
+      SpawnProductInstall(ScriptsDir + '\install-hermes.ps1', LlmArgs);
+    end;
+    if WantOpenClaw and (not FileExists(GetMarkerPath('openclaw-installed.marker'))) then begin
+      DeleteFile(GetMarkerPath('openclaw-failed.marker'));
+      SpawnProductInstall(ScriptsDir + '\install-openclaw.ps1', LlmArgs);
+    end;
+
+    AllDone := WaitForProductMarkers(WantHermes, WantOpenClaw);
+    if AllDone then Break;
+    // else: a product failed, user clicked Retry — loop respawns only the
+    //       one(s) missing an installed.marker.
   end;
 end;
 
@@ -564,28 +682,6 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// Spawn `cmd.exe /k <CmdExe> <Args>` in a brand-new, detached console window
-// with the given title.  Used end-of-install to open one window per product
-// (Hermes REPL + OpenClaw gateway) so the user can start using them without
-// manually running the wrappers.  Mirrors the `launch_products` bash helper
-// used on Linux / macOS.
-//
-// `start` is a cmd.exe builtin, not an executable — we invoke it via
-// `cmd.exe /c start ...`.  The outer cmd exits immediately; the `start`
-// spawns a fresh console that runs `cmd.exe /k` so the window stays open
-// after the product exits (useful for reading final output / errors).
-procedure LaunchInNewConsole(const Title, CmdExe, Args: String);
-var
-  StartArgs: String;
-  ResultCode: Integer;
-begin
-  // Quoted empty "" after `start` would be taken as the window title, so we
-  // pass Title explicitly; CmdExe is quoted to survive spaces in the path.
-  StartArgs := '/c start "' + Title + '" cmd.exe /k ""' + CmdExe + '" ' + Args + '"';
-  Exec(ExpandConstant('{sys}\cmd.exe'), StartArgs, '', SW_SHOWNORMAL,
-    ewNoWait, ResultCode);
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   HermesParams, OpenClawParams, UserHome, HermesCmd, OpenClawCmd: String;
@@ -601,7 +697,9 @@ begin
     HermesCmd := ExpandConstant('{localappdata}\AgentPack\bin\hermes.cmd');
     OpenClawCmd := ExpandConstant('{localappdata}\AgentPack\bin\openclaw.cmd');
 
-    // Create desktop and start menu shortcuts based on selection
+    // Create desktop and start menu shortcuts based on selection.  The
+    // per-product install PS windows are already running the agents, so we
+    // don't spawn fresh windows here — just lay down the shortcuts for later.
     if HermesCheckbox.Checked then begin
       HermesParams := '';
       CreateShortcutViaPS(
@@ -619,15 +717,6 @@ begin
       CreateShortcutViaPS(
         ExpandConstant('{group}\OpenClaw.lnk'),
         OpenClawCmd, OpenClawParams, UserHome, 'OpenClaw Gateway');
-    end;
-
-    // Open one console window per selected product so the user lands on a
-    // running Hermes REPL + OpenClaw gateway immediately after install.
-    if HermesCheckbox.Checked then begin
-      LaunchInNewConsole('Hermes Agent', HermesCmd, '');
-    end;
-    if OpenClawCheckbox.Checked then begin
-      LaunchInNewConsole('OpenClaw Gateway', OpenClawCmd, 'gateway --verbose');
     end;
   end;
 end;

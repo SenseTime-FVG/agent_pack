@@ -24,6 +24,12 @@ trap {
     else { Write-Host "[log not found: $logPath]" }
     Write-Host "==================================================" -ForegroundColor DarkGray
     Stop-InstallLog
+    try {
+        $markerDir = Join-Path $env:LOCALAPPDATA "AgentPack\markers"
+        New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $markerDir "hermes-failed.marker") `
+            -Value $logPath -Encoding ASCII
+    } catch { }
     Wait-ForKeyIfConsole
     exit 1
 }
@@ -73,3 +79,18 @@ Invoke-WslCommand -Command $command
 New-WslCommandWrappers -Name "hermes" -LinuxCommand 'hermes "$@"'
 
 Stop-InstallLog
+
+# Signal the installer that hermes is installed, so CurStepChanged can stop
+# polling.  See windows/installer.iss RunInstallScripts for the reader.
+$markerDir = Join-Path $env:LOCALAPPDATA "AgentPack\markers"
+New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $markerDir "hermes-installed.marker") `
+    -Value ([DateTime]::UtcNow.ToString("o")) -Encoding ASCII
+
+# Hand the current console over to the hermes REPL.  We don't return —
+# Inno Setup spawned us with ewNoWait, so this window is ours to keep.
+# The user Ctrl-D / Ctrl-C's hermes themselves when they're done.
+Write-Host ""
+Write-Host "[OK] Hermes Agent installed. Starting hermes in this window..." -ForegroundColor Green
+Write-Host ""
+& wsl.exe -- bash -lc 'hermes'
