@@ -286,14 +286,6 @@ function Configure-OpenClawSettings {
     Write-Ok "OpenClaw config written to $(Join-Path $HomeUnc '.openclaw')"
 }
 
-if ($SharedDir -and (Test-Path "$SharedDir\verify-llm.py") -and (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Step "Verifying API connection..."
-    $result = & python "$SharedDir\verify-llm.py" --provider $Provider --api-key $ApiKey --base-url $BaseUrl --model $Model 2>&1
-    Write-Host $result
-} else {
-    Write-Warn "Skipping API verification on Windows because Python is not available."
-}
-
 Assert-Wsl2Ready
 $homeUnc = Get-WslHomeUncPath
 
@@ -303,4 +295,28 @@ if ($Hermes) {
 
 if ($OpenClaw) {
     Configure-OpenClawSettings -HomeUnc $homeUnc
+}
+
+# Verify AFTER writing config so settings persist even if verification fails
+# (bad key, offline, rate-limited). Any Python stderr is captured into $result
+# via 2>&1 and printed, but we guard the whole block so a NativeCommandError
+# from stderr-on-failure cannot abort the script under ErrorActionPreference=Stop.
+if ($SharedDir -and (Test-Path "$SharedDir\verify-llm.py") -and (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Step "Verifying API connection..."
+    try {
+        $oldPref = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $result = & python "$SharedDir\verify-llm.py" --provider $Provider --api-key $ApiKey --base-url $BaseUrl --model $Model 2>&1
+        $verifyExit = $LASTEXITCODE
+        $ErrorActionPreference = $oldPref
+        Write-Host ($result -join "`n")
+        if ($verifyExit -ne 0) {
+            Write-Warn "API verification failed (exit $verifyExit). Config was still saved — run 'wsl hermes doctor' to re-check."
+        }
+    } catch {
+        $ErrorActionPreference = $oldPref
+        Write-Warn "API verification errored: $_. Config was still saved."
+    }
+} else {
+    Write-Warn "Skipping API verification on Windows because Python is not available."
 }
