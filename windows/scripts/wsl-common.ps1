@@ -261,6 +261,50 @@ apply_cn_env
 "@
 }
 
+function ConvertTo-BashSingleQuoted {
+    # Safely embed a user-supplied string in a bash single-quoted literal.
+    # '  ->  '"'"'
+    param([AllowNull()][string]$Value)
+
+    if ($null -eq $Value) { $Value = "" }
+    $esc = "'" + '"' + "'" + '"' + "'"
+    return "'" + $Value.Replace("'", $esc) + "'"
+}
+
+function Get-ApplyLlmBashSnippet {
+    # Build the bash snippet that sources linux/lib/configure-llm.sh, fills
+    # the LLM_* vars from the wizard, and calls apply_llm_config_for <prod>.
+    # Returns "" when no API key was provided — caller should skip it.
+    param(
+        [Parameter(Mandatory)][string]$Product,
+        [string]$Provider,
+        [string]$ApiKey,
+        [string]$BaseUrl,
+        [string]$Model
+    )
+
+    if (-not $ApiKey) { return "" }
+
+    $appRoot = Get-AgentPackRoot
+    $linuxLibDir = Join-Path $appRoot "linux\lib"
+    $linuxLibDirWsl = Convert-WindowsPathToWslPath -WindowsPath $linuxLibDir
+
+    $qProvider = ConvertTo-BashSingleQuoted $Provider
+    $qApiKey   = ConvertTo-BashSingleQuoted $ApiKey
+    $qBaseUrl  = ConvertTo-BashSingleQuoted $BaseUrl
+    $qModel    = ConvertTo-BashSingleQuoted $Model
+    $qProduct  = ConvertTo-BashSingleQuoted $Product
+
+    return @"
+. "$linuxLibDirWsl/configure-llm.sh"
+LLM_PROVIDER=$qProvider
+LLM_API_KEY=$qApiKey
+LLM_BASE_URL=$qBaseUrl
+LLM_MODEL=$qModel
+apply_llm_config_for $qProduct
+"@
+}
+
 # Create .cmd + .ps1 launchers that invoke a command inside the user's
 # default WSL distro.  We deliberately don't hardcode a distro name so the
 # launcher keeps working even if the user later switches default distros.

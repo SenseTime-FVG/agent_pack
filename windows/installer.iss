@@ -447,7 +447,7 @@ end;
 // "Illegal characters in path".
 // The PS scripts themselves dump their log and call Wait-ForKeyIfConsole
 // on failure, so the window stays open long enough to read the transcript.
-function ExecVisiblePwshWithRetry(const ScriptPath, FailMessage, LogPath: String): Boolean;
+function ExecVisiblePwshWithRetry(const ScriptPath, ExtraArgs, FailMessage, LogPath: String): Boolean;
 var
   Params, FullMsg: String;
   ResultCode, Response: Integer;
@@ -455,6 +455,9 @@ begin
   Result := False;
   Params :=
     '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"';
+  if Trim(ExtraArgs) <> '' then begin
+    Params := Params + ' ' + ExtraArgs;
+  end;
 
   while True do begin
     // SW_SHOW: open a new console so the user can watch progress and read
@@ -477,12 +480,40 @@ begin
   end;
 end;
 
+// Build the `-Provider ... -ApiKey ... [-Model ...] [-BaseUrl ...]` suffix
+// shared by install-hermes.ps1 and install-openclaw.ps1.  Returns an empty
+// string if the user left ApiKey blank — the per-product PS scripts skip
+// apply_llm_config_for in that case.
+function BuildLlmArgs: String;
+var
+  Args: String;
+begin
+  if Trim(ApiKeyEdit.Text) = '' then begin
+    Result := '';
+    Exit;
+  end;
+
+  if ProviderRadios[0].Checked then Args := '-Provider openrouter'
+  else if ProviderRadios[1].Checked then Args := '-Provider openai'
+  else if ProviderRadios[2].Checked then Args := '-Provider anthropic'
+  else Args := '-Provider custom';
+
+  Args := Args + ' -ApiKey "' + ApiKeyEdit.Text + '"';
+  if Trim(ModelEdit.Text) <> '' then begin
+    Args := Args + ' -Model "' + ModelEdit.Text + '"';
+  end;
+  if ProviderRadios[3].Checked then begin
+    Args := Args + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
+  end;
+  Result := Args;
+end;
+
 procedure RunInstallScripts;
 var
-  ScriptsDir, SharedDir, Params: String;
+  ScriptsDir, LlmArgs: String;
 begin
   ScriptsDir := ExpandConstant('{app}') + '\scripts';
-  SharedDir := ExpandConstant('{app}') + '\shared';
+  LlmArgs := BuildLlmArgs;
 
   // Run WSL2 readiness check + agent_pack prefetch in a visible console so
   // the user can read the multi-line install guidance that Assert-Wsl2Ready
@@ -491,13 +522,19 @@ begin
   // per-product installers can copy from a shared cache.
   ExecVisiblePwshWithRetry(
     ScriptsDir + '\install-deps.ps1',
+    '',
     'WSL2 setup or agent_pack prefetch failed. See the console window for details, then click Retry. ' +
     'Typical fix: open PowerShell as Administrator and run `wsl --install` (then reboot).',
     GetAgentPackLogPath('install-deps'));
 
+  // Per-product PS scripts run install_<prod> + apply_llm_config_for <prod>
+  // inside WSL so Windows shares the linux flow end-to-end.  LLM args are
+  // forwarded as script parameters; the PS script ignores them when ApiKey
+  // was left blank in the wizard.
   if HermesCheckbox.Checked then begin
     ExecVisiblePwshWithRetry(
       ScriptsDir + '\install-hermes.ps1',
+      LlmArgs,
       'Failed to install Hermes Agent inside WSL2.',
       GetAgentPackLogPath('install-hermes'));
   end;
@@ -505,29 +542,10 @@ begin
   if OpenClawCheckbox.Checked then begin
     ExecVisiblePwshWithRetry(
       ScriptsDir + '\install-openclaw.ps1',
+      LlmArgs,
       'Failed to install OpenClaw inside WSL2.',
       GetAgentPackLogPath('install-openclaw'));
   end;
-
-  if ApiKeyEdit.Text <> '' then begin
-    Params := '-ExecutionPolicy Bypass -File "' + ScriptsDir + '\configure-llm.ps1"';
-    if ProviderRadios[0].Checked then Params := Params + ' -Provider openrouter'
-    else if ProviderRadios[1].Checked then Params := Params + ' -Provider openai'
-    else if ProviderRadios[2].Checked then Params := Params + ' -Provider anthropic'
-    else Params := Params + ' -Provider custom';
-    Params := Params + ' -ApiKey "' + ApiKeyEdit.Text + '"';
-    if Trim(ModelEdit.Text) <> '' then begin
-      Params := Params + ' -Model "' + ModelEdit.Text + '"';
-    end;
-    if ProviderRadios[3].Checked then begin
-      Params := Params + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
-    end;
-    if HermesCheckbox.Checked then Params := Params + ' -Hermes';
-    if OpenClawCheckbox.Checked then Params := Params + ' -OpenClaw';
-    Params := Params + ' -SharedDir "' + SharedDir + '"';
-    ExecWithRetry('powershell.exe', Params, 'Failed to write WSL2 LLM configuration.', SW_HIDE);
-  end;
-
 end;
 
 procedure CreateShortcutViaPS(const ShortcutPath, TargetExe, Params, WorkDir, Description: String);

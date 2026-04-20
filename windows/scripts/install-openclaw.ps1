@@ -1,6 +1,15 @@
 # install-openclaw.ps1 - Install OpenClaw inside WSL2.
 # Clones agent_pack from GitHub (with CN mirror fallback) and delegates to
-# repos/openclaw/scripts/install.sh --install-method git --source-ready.
+# repos/openclaw/scripts/install.sh --install-method git --source-ready,
+# then — if LLM parameters were supplied by the wizard — invokes
+# apply_llm_config_for in the same WSL session.
+
+param(
+    [string]$Provider = "",
+    [string]$ApiKey   = "",
+    [string]$BaseUrl  = "",
+    [string]$Model    = ""
+)
 
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\wsl-common.ps1"
@@ -39,6 +48,13 @@ $linuxLibDirWsl = Convert-WindowsPathToWslPath -WindowsPath $linuxLibDir
 $mirrorPreamble = Get-CnMirrorBashPreamble
 $cnFlag = if ($isChina) { "1" } else { "0" }
 
+$applySnippet = Get-ApplyLlmBashSnippet `
+    -Product "openclaw" `
+    -Provider $Provider `
+    -ApiKey $ApiKey `
+    -BaseUrl $BaseUrl `
+    -Model $Model
+
 $command = @"
 set -euo pipefail
 export AGENTPACK_CN='$cnFlag'
@@ -46,6 +62,7 @@ export AGENT_PACK_CACHE_DIR="`$HOME/.agent-pack/.cache/agent_pack"
 $mirrorPreamble
 . "$linuxLibDirWsl/install-openclaw.sh"
 install_openclaw
+$applySnippet
 "@
 
 Invoke-WslCommand -Command $command

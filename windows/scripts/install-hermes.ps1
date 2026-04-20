@@ -1,6 +1,15 @@
 # install-hermes.ps1 - Install Hermes Agent inside WSL2.
 # Clones agent_pack from GitHub (with CN mirror fallback) and delegates to
-# repos/hermes-agent/scripts/install.sh --source-ready.
+# repos/hermes-agent/scripts/install.sh --source-ready, then — if LLM
+# parameters were supplied by the wizard — invokes apply_llm_config_for in
+# the same WSL session so config lands right after install.
+
+param(
+    [string]$Provider = "",
+    [string]$ApiKey   = "",
+    [string]$BaseUrl  = "",
+    [string]$Model    = ""
+)
 
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\wsl-common.ps1"
@@ -39,10 +48,17 @@ $linuxLibDirWsl = Convert-WindowsPathToWslPath -WindowsPath $linuxLibDir
 $mirrorPreamble = Get-CnMirrorBashPreamble
 $cnFlag = if ($isChina) { "1" } else { "0" }
 
-# Source the linux library and call install_hermes.  AGENTPACK_CN tells the
-# shared fetch helper whether to try CN mirrors; AGENT_PACK_CACHE_DIR lets
-# fetch-agent-pack.sh copy from the shared clone created by
-# prefetch-agent-pack.ps1 instead of cloning again.
+# Source the linux library, run install_hermes, then apply the LLM config.
+# Doing both in one WSL session means the same AGENTPACK_CN / mirror env
+# carries into config verification (`verify-llm.py`) and apply edits the
+# freshly-seeded ~/.hermes/config.yaml template.
+$applySnippet = Get-ApplyLlmBashSnippet `
+    -Product "hermes" `
+    -Provider $Provider `
+    -ApiKey $ApiKey `
+    -BaseUrl $BaseUrl `
+    -Model $Model
+
 $command = @"
 set -euo pipefail
 export AGENTPACK_CN='$cnFlag'
@@ -50,6 +66,7 @@ export AGENT_PACK_CACHE_DIR="`$HOME/.agent-pack/.cache/agent_pack"
 $mirrorPreamble
 . "$linuxLibDirWsl/install-hermes.sh"
 install_hermes
+$applySnippet
 "@
 
 Invoke-WslCommand -Command $command
