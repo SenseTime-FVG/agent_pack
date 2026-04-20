@@ -213,12 +213,20 @@ PY
             # bundled provider definitions supply baseUrl/endpoints; and put
             # the API key in ~/.openclaw/.env, which openclaw auto-loads
             # (see src/infra/dotenv.ts: loadDotEnv).
+            # For bundled providers (openrouter/openai/anthropic) openclaw
+            # already knows baseUrl + model list, so `<prefix>/<model>`
+            # resolves via the built-in registry.  For custom endpoints we
+            # must register a provider entry with the user's baseUrl and
+            # the specific model id, otherwise openclaw throws
+            # "Unknown model: <prefix>/<model>" at gateway warmup.
+            # We keep the custom-provider name literally "custom" to avoid
+            # clashing with the bundled "openai" provider.
             local provider_prefix
             case "$provider" in
                 openrouter) provider_prefix="openrouter" ;;
                 openai)     provider_prefix="openai"     ;;
                 anthropic)  provider_prefix="anthropic"  ;;
-                custom)     provider_prefix="openai"     ;;
+                custom)     provider_prefix="custom"     ;;
                 *)          provider_prefix="openai"     ;;
             esac
 
@@ -268,6 +276,41 @@ PY
                     mv "$cfg" "$cfg.bak" 2>/dev/null || rm -f "$cfg"
                 fi
             fi
+
+            # openclaw resolves <prefix>/<model> via its model registry:
+            # bundled providers know a fixed catalog (openrouter/openai/
+            # anthropic's official model IDs) and will throw "Unknown model"
+            # if the user picks a variant that isn't in that catalog —
+            # e.g. MiniMax, Moonshot, or any OpenAI-compatible third-party
+            # that routes through an OpenAI-shaped endpoint.  To keep the
+            # installer predictable for ALL four provider options we register
+            # the user's exact model id under models.providers.<prefix>.
+            # This overrides bundled entries where they exist and creates
+            # one where they don't.
+            local api_dialect
+            case "$provider" in
+                anthropic) api_dialect="anthropic-messages" ;;
+                *)         api_dialect="openai-completions" ;;
+            esac
+
+            local provider_json
+            provider_json="$(
+                BASE_URL="$base_url" API_KEY="$api_key" MODEL="$model" API="$api_dialect" \
+                python3 -c '
+import json, os
+print(json.dumps({
+    "baseUrl": os.environ["BASE_URL"],
+    "apiKey": os.environ["API_KEY"],
+    "models": [{
+        "id": os.environ["MODEL"],
+        "name": os.environ["MODEL"],
+        "api": os.environ["API"],
+    }],
+}))
+')"
+            openclaw config set "models.providers.${provider_prefix}" \
+                "$provider_json" --strict-json
+            echo "[OK] OpenClaw provider registered: ${provider_prefix} -> ${model} (${api_dialect})"
 
             openclaw config set agents.defaults.model "${provider_prefix}/${model}"
             echo "[OK] OpenClaw model set via 'openclaw config set'"
