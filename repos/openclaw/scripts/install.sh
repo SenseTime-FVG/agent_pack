@@ -969,6 +969,7 @@ USE_BETA=${OPENCLAW_BETA:-0}
 GIT_DIR_DEFAULT="${HOME}/openclaw"
 GIT_DIR=${OPENCLAW_GIT_DIR:-$GIT_DIR_DEFAULT}
 GIT_UPDATE=${OPENCLAW_GIT_UPDATE:-1}
+SOURCE_READY=${OPENCLAW_SOURCE_READY:-0}
 SHARP_IGNORE_GLOBAL_LIBVIPS="${SHARP_IGNORE_GLOBAL_LIBVIPS:-1}"
 NPM_LOGLEVEL="${OPENCLAW_NPM_LOGLEVEL:-error}"
 NPM_SILENT_FLAG="--silent"
@@ -993,6 +994,7 @@ Options:
   --beta                               Use beta if available, else latest
   --git-dir, --dir <path>             Checkout directory (default: ~/openclaw)
   --no-git-update                      Skip git pull for existing checkout
+  --source-ready                       Source tree already at --git-dir; skip clone + pull
   --no-onboard                          Skip onboarding (non-interactive)
   --no-prompt                           Disable prompts (required in CI/automation)
   --verify                              Run a post-install smoke verify
@@ -1006,6 +1008,7 @@ Environment variables:
   OPENCLAW_BETA=0|1
   OPENCLAW_GIT_DIR=...
   OPENCLAW_GIT_UPDATE=0|1
+  OPENCLAW_SOURCE_READY=0|1            Skip clone + pull (agent_pack pre-populated source)
   OPENCLAW_NO_PROMPT=1
   OPENCLAW_VERIFY_INSTALL=1
   OPENCLAW_DRY_RUN=1
@@ -1079,6 +1082,12 @@ parse_args() {
                 shift 2
                 ;;
             --no-git-update)
+                GIT_UPDATE=0
+                shift
+                ;;
+            --source-ready)
+                # Source tree is already populated at --git-dir; skip clone + pull.
+                SOURCE_READY=1
                 GIT_UPDATE=0
                 shift
                 ;;
@@ -1886,7 +1895,13 @@ install_openclaw_from_git() {
     local repo_dir="$1"
     local repo_url="https://github.com/openclaw/openclaw.git"
 
-    if [[ -d "$repo_dir/.git" ]]; then
+    if [[ "$SOURCE_READY" == "1" ]]; then
+        ui_info "Installing OpenClaw from pre-populated source: ${repo_dir}"
+        if [[ ! -d "$repo_dir" ]]; then
+            ui_error "--source-ready was set but $repo_dir does not exist"
+            exit 1
+        fi
+    elif [[ -d "$repo_dir/.git" ]]; then
         ui_info "Installing OpenClaw from git checkout: ${repo_dir}"
     else
         ui_info "Installing OpenClaw from GitHub (${repo_url})"
@@ -1899,7 +1914,7 @@ install_openclaw_from_git() {
     ensure_pnpm
     ensure_pnpm_binary_for_scripts
 
-    if [[ ! -d "$repo_dir" ]]; then
+    if [[ "$SOURCE_READY" != "1" && ! -d "$repo_dir" ]]; then
         run_quiet_step "Cloning OpenClaw" git clone "$repo_url" "$repo_dir"
     fi
 

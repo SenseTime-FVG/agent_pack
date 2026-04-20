@@ -37,6 +37,7 @@ NODE_VERSION="22"
 USE_VENV=true
 RUN_SETUP=true
 BRANCH="main"
+SOURCE_READY=false
 
 # Detect non-interactive mode (e.g. curl | bash)
 # When stdin is not a terminal, read -p will fail with EOF,
@@ -70,6 +71,11 @@ while [[ $# -gt 0 ]]; do
             HERMES_HOME="$2"
             shift 2
             ;;
+        --source-ready)
+            # Source tree is already populated at --dir; skip clone/pull.
+            SOURCE_READY=true
+            shift
+            ;;
         -h|--help)
             echo "Hermes Agent Installer"
             echo ""
@@ -81,6 +87,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --branch NAME  Git branch to install (default: main)"
             echo "  --dir PATH     Installation directory (default: ~/.hermes/hermes-agent)"
             echo "  --hermes-home PATH  Data directory (default: ~/.hermes, or \$HERMES_HOME)"
+            echo "  --source-ready Skip clone/pull; source tree already at --dir"
             echo "  -h, --help     Show this help"
             exit 0
             ;;
@@ -717,6 +724,18 @@ show_manual_install_hint() {
 
 clone_repo() {
     log_info "Installing to $INSTALL_DIR..."
+
+    if [ "$SOURCE_READY" = "true" ]; then
+        # Source tree was prepared by the outer installer (agent_pack).
+        # Skip all git clone/pull/fetch logic — we treat the tree as authoritative.
+        if [ ! -d "$INSTALL_DIR" ]; then
+            log_error "--source-ready was set but $INSTALL_DIR does not exist"
+            exit 1
+        fi
+        cd "$INSTALL_DIR"
+        log_success "Source tree ready (skipped clone)"
+        return 0
+    fi
 
     if [ -d "$INSTALL_DIR" ]; then
         if [ -d "$INSTALL_DIR/.git" ]; then

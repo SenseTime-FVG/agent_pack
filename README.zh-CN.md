@@ -12,18 +12,23 @@
 
 ## 工作原理
 
-两个产品都委托给它们各自的官方 `scripts/install.sh` 来安装。官方脚本会自动处理所有运行时依赖（Python、Node.js、uv、git、构建工具）。Agent Pack 只负责高层次的流程编排：
+Agent Pack 是我们所维护的 Hermes Agent 和 OpenClaw 源码（位于 `repos/` 下）的**唯一真相源**。安装时各平台都会从 GitHub 重新克隆本 monorepo，拷出对应产品子目录，然后以 `--source-ready` 调用产品自带的 `scripts/install.sh`，让它跳过自己的 clone/pull、直接使用刚拷贝出来的源码。运行时依赖（Python、Node.js、uv、git、构建工具）仍由产品自带的安装脚本处理。
 
 ```
 Step 1: 选择产品 (Hermes / OpenClaw / 两者都要)
-Step 2: 为每个产品运行官方 install.sh
-        - Hermes:   install.sh --skip-setup
-        - OpenClaw: install.sh --no-onboard --no-prompt
+Step 2: clone agent_pack、拷出 repos/<product>、运行其 install.sh
+        - Hermes:   install.sh --source-ready --skip-setup --dir <target>
+        - OpenClaw: install.sh --install-method git --source-ready --git-dir <target> \
+                                --no-onboard --no-prompt
 Step 3: 写入 LLM 供应商配置
         (~/.hermes/config.yaml, ~/.openclaw/openclaw.json)
 ```
 
 Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/openclaw/skills/` 中，随产品安装一起完成，无需单独的复制步骤。
+
+### 中国区镜像
+
+安装器检测到中国区网络（或设置了 `AGENTPACK_CN=1`）时，会在 clone URL 前加上 GitHub 代理前缀：默认依次尝试 `https://ghproxy.cn/` 和 `https://ghfast.top/`，失败自动切换到下一个。镜像列表可在 `config/defaults.json` 的 `agent_pack.cn_mirrors` 中自定义。
 
 ## 平台级前提
 
@@ -74,7 +79,7 @@ cd macos
 无需构建。可以分发 `linux/install.sh` 加 `linux/lib/` 目录，或者托管整个 repo 然后用：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/agent-pack/main/linux/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh | bash
 ```
 
 ## 配置
@@ -92,19 +97,19 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/agent-pack/main/linux/inst
 
 ### 产品安装源
 
-`config/defaults.json` 保存官方安装脚本的 URL 和 Hermes 的分支：
+`config/defaults.json` 声明 vendored 源码从哪里拉取、每个产品装到哪：
 
 ```json
-"hermes": {
-  "install_script_url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh",
-  "branch": "main"
+"agent_pack": {
+  "repo_url": "https://github.com/SenseTime-FVG/agent_pack.git",
+  "branch": "main",
+  "cn_mirrors": ["https://ghproxy.cn/", "https://ghfast.top/"]
 },
-"openclaw": {
-  "install_script_url": "https://openclaw.ai/install.sh"
-}
+"hermes":   { "branch": "main", "install_dir": "$HOME/.agent-pack/repos/hermes-agent" },
+"openclaw": {                   "install_dir": "$HOME/.agent-pack/repos/openclaw" }
 ```
 
-在线安装时直接拉取这些 URL。离线安装（Windows `.exe` / macOS `.pkg`）使用安装包中自带的 `repos/*/scripts/install.sh`。
+所有平台（Windows/macOS/Linux）都会在安装时 clone `agent_pack.repo_url`，再拷出 `repos/<product>/`。已经不再有"离线安装"这条独立路径——Windows `.exe` 和 macOS `.pkg` 只打包胶水脚本，不再打包产品源码。
 
 ### LLM 供应商
 
@@ -121,9 +126,9 @@ curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/agent-pack/main/linux/inst
 
 ```text
 agent_pack/
-|- config/            # 唯一的配置来源：defaults.json（URL、LLM 供应商）
-|- shared/            # verify-llm.py（API 连通性检查）
-|- repos/             # 预克隆的 hermes-agent 和 openclaw，skills 已打包进去
+|- config/            # 唯一的配置来源：defaults.json（仓库 URL、镜像、LLM 供应商）
+|- shared/            # verify-llm.py + fetch-agent-pack.sh（克隆 agent_pack，CN 自动 fallback）
+|- repos/             # Vendored hermes-agent 和 openclaw 源码（skills 一并包含）
 |- windows/           # Inno Setup 安装器 + PowerShell/WSL 桥接脚本
 |- macos/             # .pkg 构建器 + pre/postinstall 脚本
 \- linux/             # Bash 安装器 (install.sh + lib/)

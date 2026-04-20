@@ -1,4 +1,6 @@
-# install-hermes.ps1 - Install Hermes Agent inside WSL2 using the official installer.
+# install-hermes.ps1 - Install Hermes Agent inside WSL2.
+# Clones agent_pack from GitHub (with CN mirror fallback) and delegates to
+# repos/hermes-agent/scripts/install.sh --source-ready.
 
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\wsl-common.ps1"
@@ -7,8 +9,14 @@ $logPath = Start-InstallLog -Name "install-hermes"
 trap {
     Write-Host ""
     Write-Host "[!] Installation failed. Full log: $logPath" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "==================== FULL LOG ====================" -ForegroundColor DarkGray
+    if (Test-Path $logPath) { Get-Content -LiteralPath $logPath | Write-Host }
+    else { Write-Host "[log not found: $logPath]" }
+    Write-Host "==================================================" -ForegroundColor DarkGray
     Stop-InstallLog
-    break
+    Wait-ForKeyIfConsole
+    exit 1
 }
 
 Write-Host ""
@@ -16,33 +24,32 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Installing Hermes Agent" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$distro = Assert-Wsl2Ready
-Write-Ok "Running installer commands inside WSL2 distro '$($distro.Name)'"
-if (Test-IsChinaRegion) {
-    Write-Ok "Detected China network — using domestic mirrors for uv / pip / npm"
-}
-$appRoot = Get-AgentPackRoot
-$reposDir = Join-Path $appRoot "repos\hermes-agent"
-$reposDirWsl = Convert-WindowsPathToWslPath -Distro $distro.Name -WindowsPath $reposDir
+Assert-Wsl2Ready
+Write-Ok "Running installer commands inside the default WSL2 distro"
 
-# The bundled repo contains the official scripts/install.sh which handles
-# all dependency detection (uv, Python, git, Node.js), venv creation,
-# pip install, PATH setup, and config templating.
-# We pass --skip-setup so Agent Pack's own LLM configuration step runs instead.
+$isChina = Test-IsChinaRegion
+if ($isChina) {
+    Write-Ok "Detected China network — using domestic mirrors for uv / pip / npm / git"
+}
+
+$appRoot = Get-AgentPackRoot
+$linuxLibDir = Join-Path $appRoot "linux\lib"
+$linuxLibDirWsl = Convert-WindowsPathToWslPath -WindowsPath $linuxLibDir
+
 $mirrorPreamble = Get-CnMirrorBashPreamble
+$cnFlag = if ($isChina) { "1" } else { "0" }
+
+# Source the linux library and call install_hermes.  AGENTPACK_CN tells the
+# shared fetch helper whether to try CN mirrors.
 $command = @"
 set -euo pipefail
+export AGENTPACK_CN='$cnFlag'
 $mirrorPreamble
-target_dir="`$HOME/.hermes/hermes-agent"
-if [ -d "`$target_dir" ]; then
-    rm -rf "`$target_dir"
-fi
-mkdir -p "`$(dirname "`$target_dir")"
-cp -a "$reposDirWsl" "`$target_dir"
-bash "`$target_dir/scripts/install.sh" --skip-setup --dir "`$target_dir"
+. "$linuxLibDirWsl/install-hermes.sh"
+install_hermes
 "@
 
-Invoke-WslCommand -Distro $distro.Name -Command $command
-New-WslCommandWrappers -Name "hermes" -Distro $distro.Name -LinuxCommand 'hermes "$@"'
+Invoke-WslCommand -Command $command
+New-WslCommandWrappers -Name "hermes" -LinuxCommand 'hermes "$@"'
 
 Stop-InstallLog

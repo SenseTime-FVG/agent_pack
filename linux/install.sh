@@ -9,11 +9,33 @@ set -euo pipefail
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$INSTALLER_DIR/lib"
 
-# If running via curl | bash, download the full package first
+# If running via curl | bash, download the full package first.
+# This bootstrap can't read config/defaults.json yet (we haven't fetched it),
+# so the repo URL + CN mirrors are duplicated here as a minimal bootstrap.
+# Keep the mirror list in sync with config/defaults.json (agent_pack.cn_mirrors).
+AGENT_PACK_REPO="https://github.com/SenseTime-FVG/agent_pack.git"
 if [ ! -d "$LIB_DIR" ]; then
     echo "[*] Downloading Agent Pack installer..."
     TMPDIR=$(mktemp -d)
-    git clone -q --depth 1 https://github.com/YOUR_ORG/agent-pack.git "$TMPDIR/agent-pack"
+    _cloned=0
+    _bootstrap_try() {
+        git clone -q --depth 1 "$1" "$TMPDIR/agent-pack" 2>/dev/null
+    }
+    if _bootstrap_try "$AGENT_PACK_REPO"; then
+        _cloned=1
+    else
+        for _mirror in "https://ghproxy.cn/" "https://ghfast.top/"; do
+            rm -rf "$TMPDIR/agent-pack"
+            if _bootstrap_try "${_mirror}${AGENT_PACK_REPO}"; then
+                _cloned=1
+                break
+            fi
+        done
+    fi
+    if [ "$_cloned" -ne 1 ]; then
+        echo "[!] Failed to clone $AGENT_PACK_REPO (direct and via CN mirrors)." >&2
+        exit 1
+    fi
     INSTALLER_DIR="$TMPDIR/agent-pack/linux"
     LIB_DIR="$INSTALLER_DIR/lib"
 fi

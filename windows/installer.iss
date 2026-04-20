@@ -4,7 +4,7 @@
 #define MyAppName "Agent Pack"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Agent Pack"
-#define MyAppURL "https://github.com/YOUR_ORG/agent-pack"
+#define MyAppURL "https://github.com/SenseTime-FVG/agent_pack"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -35,9 +35,12 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: recursesubdirs
 Source: "..\shared\*"; DestDir: "{app}\shared"; Flags: recursesubdirs
 Source: "..\config\*"; DestDir: "{app}\config"; Flags: recursesubdirs
-; Bundle pre-cloned repos (skills are already included inside each repo)
-Source: "..\repos\hermes-agent\*"; DestDir: "{app}\repos\hermes-agent"; Flags: recursesubdirs
-Source: "..\repos\openclaw\*"; DestDir: "{app}\repos\openclaw"; Flags: recursesubdirs
+; linux/lib is sourced from Windows PS scripts via WSL bash; ship it too so the
+; WSL side can find install-hermes.sh / install-openclaw.sh without re-cloning.
+Source: "..\linux\lib\*"; DestDir: "{app}\linux\lib"; Flags: recursesubdirs
+; repos/ is NO LONGER bundled — installers clone agent_pack from GitHub at
+; install time (with CN mirror fallback) so users always get the latest
+; vendored sources without paying a huge installer download.
 
 [Icons]
 ; Created conditionally in code section based on product selection
@@ -437,29 +440,26 @@ begin
   end;
 end;
 
-// Launch a PowerShell install script in a fresh, VISIBLE console window so the
-// user can watch progress and read the error if something fails.  We go
-// through `cmd.exe /c start "title" /wait conhost.exe powershell.exe ...` so
-// that Windows actually allocates a new console window attached to our
-// PowerShell process (Exec() alone does not, which is why output was invisible
-// before).  The trailing `pause` keeps the window open after failure so the
-// user can read the error.
+// Launch a PowerShell install script in a VISIBLE console window.
+// We invoke powershell.exe directly (no cmd /k wrapper) to avoid the nested
+// quoting pitfall where """<path>""" gets re-expanded into a literally-quoted
+// path like '"D:\tmp\...\foo.ps1"' that PowerShell then rejects as
+// "Illegal characters in path".
+// The PS scripts themselves dump their log and call Wait-ForKeyIfConsole
+// on failure, so the window stays open long enough to read the transcript.
 function ExecVisiblePwshWithRetry(const ScriptPath, FailMessage, LogPath: String): Boolean;
 var
-  Cmd, Params, FullMsg: String;
+  Params, FullMsg: String;
   ResultCode, Response: Integer;
 begin
   Result := False;
-  // start /wait: parent cmd waits until console closes
-  // conhost.exe /c powershell ... : forces a real console window
-  Cmd :=
-    'start "Agent Pack - WSL2 Installer" /wait conhost.exe powershell.exe '
-    + '-NoProfile -ExecutionPolicy Bypass -NoExit -Command '
-    + '"try { & ''' + ScriptPath + ''' } catch { Write-Host $_ -ForegroundColor Red; exit 1 } finally { Write-Host ''''; Write-Host ''Press any key to close this window...''; $null = $Host.UI.RawUI.ReadKey(''NoEcho,IncludeKeyDown'') }"';
-  Params := '/c ' + Cmd;
+  Params :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '"';
 
   while True do begin
-    if Exec('cmd.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then begin
+    // SW_SHOW: open a new console so the user can watch progress and read
+    // the log dump that the PS trap emits on failure.
+    if Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then begin
       Result := True;
       Exit;
     end;
@@ -467,11 +467,13 @@ begin
     FullMsg := FailMessage + #13#10#13#10
       + 'Exit code: ' + IntToStr(ResultCode) + #13#10
       + 'Log file: ' + LogPath + #13#10#13#10
-      + 'Click Retry to try again, Cancel to abort installation.';
+      + 'Click Retry to re-run the installer script, Cancel to abort installation.';
     Response := MsgBox(FullMsg, mbError, MB_RETRYCANCEL);
     if Response = IDCANCEL then begin
       Abort;
     end;
+    // IDRETRY: loop re-invokes powershell.exe with the same -File script,
+    // giving the user a fresh attempt (e.g. after they fix WSL2 / networking).
   end;
 end;
 

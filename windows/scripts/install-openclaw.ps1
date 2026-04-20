@@ -1,4 +1,6 @@
-# install-openclaw.ps1 - Install OpenClaw inside WSL2 using the official installer.
+# install-openclaw.ps1 - Install OpenClaw inside WSL2.
+# Clones agent_pack from GitHub (with CN mirror fallback) and delegates to
+# repos/openclaw/scripts/install.sh --install-method git --source-ready.
 
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\wsl-common.ps1"
@@ -7,8 +9,14 @@ $logPath = Start-InstallLog -Name "install-openclaw"
 trap {
     Write-Host ""
     Write-Host "[!] Installation failed. Full log: $logPath" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "==================== FULL LOG ====================" -ForegroundColor DarkGray
+    if (Test-Path $logPath) { Get-Content -LiteralPath $logPath | Write-Host }
+    else { Write-Host "[log not found: $logPath]" }
+    Write-Host "==================================================" -ForegroundColor DarkGray
     Stop-InstallLog
-    break
+    Wait-ForKeyIfConsole
+    exit 1
 }
 
 Write-Host ""
@@ -16,34 +24,30 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Installing OpenClaw" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$distro = Assert-Wsl2Ready
-Write-Ok "Running installer commands inside WSL2 distro '$($distro.Name)'"
-if (Test-IsChinaRegion) {
-    Write-Ok "Detected China network — using domestic mirrors for uv / pip / npm"
-}
-$appRoot = Get-AgentPackRoot
-$reposDir = Join-Path $appRoot "repos\openclaw"
-$reposDirWsl = Convert-WindowsPathToWslPath -Distro $distro.Name -WindowsPath $reposDir
+Assert-Wsl2Ready
+Write-Ok "Running installer commands inside the default WSL2 distro"
 
-# The bundled repo contains the official scripts/install.sh which handles
-# dependency detection, installation, PATH setup, and config templating.
-#
-# We deliberately use --install-method npm (not git):
-#   - Inno Setup's [Files] section does not bundle .git directories, so the
-#     bundled checkout cannot be used as a git work tree.
-#   - npm mode installs from the npm registry and does not require a local
-#     checkout or .git metadata.
-# We still invoke the bundled install.sh so the installer semantics track the
-# version we ship.  --no-onboard --no-prompt skips the interactive wizard so
-# Agent Pack's own LLM configuration step runs instead.
+$isChina = Test-IsChinaRegion
+if ($isChina) {
+    Write-Ok "Detected China network — using domestic mirrors for uv / pip / npm / git"
+}
+
+$appRoot = Get-AgentPackRoot
+$linuxLibDir = Join-Path $appRoot "linux\lib"
+$linuxLibDirWsl = Convert-WindowsPathToWslPath -WindowsPath $linuxLibDir
+
 $mirrorPreamble = Get-CnMirrorBashPreamble
+$cnFlag = if ($isChina) { "1" } else { "0" }
+
 $command = @"
 set -euo pipefail
+export AGENTPACK_CN='$cnFlag'
 $mirrorPreamble
-bash "$reposDirWsl/scripts/install.sh" --install-method npm --no-onboard --no-prompt
+. "$linuxLibDirWsl/install-openclaw.sh"
+install_openclaw
 "@
 
-Invoke-WslCommand -Distro $distro.Name -Command $command
-New-WslCommandWrappers -Name "openclaw" -Distro $distro.Name -LinuxCommand 'openclaw "$@"'
+Invoke-WslCommand -Command $command
+New-WslCommandWrappers -Name "openclaw" -LinuxCommand 'openclaw "$@"'
 
 Stop-InstallLog

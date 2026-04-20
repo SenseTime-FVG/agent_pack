@@ -1,10 +1,18 @@
 {
+  "agent_pack": {
+    "repo_url": "https://github.com/SenseTime-FVG/agent_pack.git",
+    "branch": "main",
+    "cn_mirrors": [
+      "https://ghproxy.cn/",
+      "https://ghfast.top/"
+    ]
+  },
   "hermes": {
-    "install_script_url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh",
-    "branch": "main"
+    "branch": "main",
+    "install_dir": "$HOME/.agent-pack/repos/hermes-agent"
   },
   "openclaw": {
-    "install_script_url": "https://openclaw.ai/install.sh"
+    "install_dir": "$HOME/.agent-pack/repos/openclaw"
   },
   "llm_providers": {
     "openrouter": {

@@ -105,12 +105,9 @@ function Set-DotEnvValues {
 }
 
 function Test-WslCommandExists {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$CommandName
-    )
+    param([Parameter(Mandatory)][string]$CommandName)
 
-    & wsl.exe -d $Distro -- bash -lc "command -v $CommandName >/dev/null 2>&1"
+    & wsl.exe -- bash -lc "command -v $CommandName >/dev/null 2>&1"
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -201,15 +198,12 @@ function Get-OpenClawModelRef {
 }
 
 function Configure-HermesSettings {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$HomeUnc
-    )
+    param([Parameter(Mandatory)][string]$HomeUnc)
 
     $envValues = Get-HermesEnvValues -SelectedProvider $Provider -SelectedApiKey $ApiKey -SelectedBaseUrl $BaseUrl
     $envKeys = @("OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY")
 
-    if (Test-WslCommandExists -Distro $Distro -CommandName "hermes") {
+    if (Test-WslCommandExists -CommandName "hermes") {
         $commands = @(
             "set -euo pipefail",
             "hermes config set model.default $(ConvertTo-BashSingleQuoted $Model)",
@@ -221,7 +215,7 @@ function Configure-HermesSettings {
             $commands += "hermes config set $key $(ConvertTo-BashSingleQuoted $envValues[$key])"
         }
 
-        Invoke-WslCommand -Distro $Distro -Command ($commands -join "`n")
+        Invoke-WslCommand -Command ($commands -join "`n")
     } else {
         $configDir = Join-Path $HomeUnc ".hermes"
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
@@ -240,10 +234,7 @@ model:
 }
 
 function Configure-OpenClawSettings {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$HomeUnc
-    )
+    param([Parameter(Mandatory)][string]$HomeUnc)
 
     $configDir = Join-Path $HomeUnc ".openclaw"
     $configPath = Join-Path $configDir "openclaw.json"
@@ -255,12 +246,12 @@ function Configure-OpenClawSettings {
     New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     Set-DotEnvValues -Path $envPath -Values $envValues -KeyOrder $envKeys
 
-    if (Test-WslCommandExists -Distro $Distro -CommandName "openclaw") {
+    if (Test-WslCommandExists -CommandName "openclaw") {
         $commands = @(
             "set -euo pipefail",
             "openclaw config set agents.defaults.model.primary $(ConvertTo-BashSingleQuoted $modelRef)"
         )
-        Invoke-WslCommand -Distro $Distro -Command ($commands -join "`n")
+        Invoke-WslCommand -Command ($commands -join "`n")
     } else {
         $configObject = $null
         if (Test-Path -LiteralPath $configPath) {
@@ -303,13 +294,13 @@ if ($SharedDir -and (Test-Path "$SharedDir\verify-llm.py") -and (Get-Command pyt
     Write-Warn "Skipping API verification on Windows because Python is not available."
 }
 
-$distro = Assert-Wsl2Ready
-$homeUnc = Get-WslHomeUncPath -Distro $distro.Name
+Assert-Wsl2Ready
+$homeUnc = Get-WslHomeUncPath
 
 if ($Hermes) {
-    Configure-HermesSettings -Distro $distro.Name -HomeUnc $homeUnc
+    Configure-HermesSettings -HomeUnc $homeUnc
 }
 
 if ($OpenClaw) {
-    Configure-OpenClawSettings -Distro $distro.Name -HomeUnc $homeUnc
+    Configure-OpenClawSettings -HomeUnc $homeUnc
 }

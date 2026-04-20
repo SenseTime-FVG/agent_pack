@@ -12,8 +12,14 @@ $logPath = Start-InstallLog -Name "install-deps"
 trap {
     Write-Host ""
     Write-Host "[!] Dependency check failed. Full log: $logPath" -ForegroundColor Red
-    Stop-InstallLog
-    break
+    Write-Host ""
+    Write-Host "==================== FULL LOG ====================" -ForegroundColor DarkGray
+    if (Test-Path $logPath) { Get-Content -LiteralPath $logPath | Write-Host }
+    else { Write-Host "[log not found: $logPath]" }
+    Write-Host "==================================================" -ForegroundColor DarkGray
+    try { Stop-Transcript | Out-Null } catch { }
+    Wait-ForKeyIfConsole
+    exit 1
 }
 
 Write-Host ""
@@ -21,10 +27,10 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Checking Windows Dependencies" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-$distro = Assert-Wsl2Ready
-Write-Ok "Using WSL distro '$($distro.Name)' (version $($distro.Version))"
+Assert-Wsl2Ready
+Write-Ok "WSL2 default distro is reachable"
 
-Invoke-WslCommand -Distro $distro.Name -Command 'set -euo pipefail; uname -a >/dev/null'
+Invoke-WslCommand -Command 'set -euo pipefail; uname -a >/dev/null'
 Write-Ok "WSL shell is ready"
 
 if (Test-IsChinaRegion) {

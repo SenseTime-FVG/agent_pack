@@ -12,17 +12,22 @@ Multi-platform one-click installer for [Hermes Agent](https://github.com/NousRes
 
 ## How It Works
 
-Both products are installed by delegating to their own official `scripts/install.sh`, which handles all runtime dependencies (Python, Node.js, uv, git, build tools) on its own. Agent Pack only coordinates the high-level flow:
+Agent Pack is the source of truth for its vendored copies of Hermes Agent and OpenClaw (under `repos/`). At install time, each installer clones this monorepo fresh from GitHub, copies out the relevant subdirectory, and invokes the bundled `scripts/install.sh` with `--source-ready` so it skips its own clone/pull and uses the freshly copied source. Runtime dependencies (Python, Node.js, uv, git, build tools) are still handled by the product installer.
 
 ```
 Step 1: Select products (Hermes / OpenClaw / Both)
-Step 2: Run official install.sh for each product
-        - Hermes:   install.sh --skip-setup
-        - OpenClaw: install.sh --no-onboard --no-prompt
+Step 2: Clone agent_pack, copy out repos/<product>, run its install.sh
+        - Hermes:   install.sh --source-ready --skip-setup --dir <target>
+        - OpenClaw: install.sh --install-method git --source-ready --git-dir <target> \
+                                --no-onboard --no-prompt
 Step 3: Write LLM provider config (~/.hermes/config.yaml, ~/.openclaw/openclaw.json)
 ```
 
 Bundled skills live inside `repos/hermes-agent/skills/` and `repos/openclaw/skills/`, so they are installed as part of each product's normal install — no extra step needed.
+
+### China-region mirrors
+
+When the installer detects a China region (or `AGENTPACK_CN=1` is set), it prefixes the clone URL with a GitHub proxy — defaults are `https://ghproxy.cn/` then `https://ghfast.top/`, tried in order on failure. Override the list in `config/defaults.json` under `agent_pack.cn_mirrors`.
 
 ## Platform Prerequisites
 
@@ -73,7 +78,7 @@ Output: `dist/AgentPack-1.0.0.pkg`
 No build step needed. Distribute `linux/install.sh` and `linux/lib/` together, or host the full repo and use:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/agent-pack/main/linux/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh | bash
 ```
 
 ## Configuration
@@ -91,19 +96,19 @@ To update the skill set, edit the `skills/` directory of the relevant repo and c
 
 ### Product Install Sources
 
-`config/defaults.json` holds the official install-script URLs and the Hermes branch:
+`config/defaults.json` declares where the vendored source tree is fetched from and where each product gets installed:
 
 ```json
-"hermes": {
-  "install_script_url": "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh",
-  "branch": "main"
+"agent_pack": {
+  "repo_url": "https://github.com/SenseTime-FVG/agent_pack.git",
+  "branch": "main",
+  "cn_mirrors": ["https://ghproxy.cn/", "https://ghfast.top/"]
 },
-"openclaw": {
-  "install_script_url": "https://openclaw.ai/install.sh"
-}
+"hermes":   { "branch": "main", "install_dir": "$HOME/.agent-pack/repos/hermes-agent" },
+"openclaw": {                   "install_dir": "$HOME/.agent-pack/repos/openclaw" }
 ```
 
-Online installs fetch these URLs directly. Bundled installs (Windows `.exe` / macOS `.pkg`) use the pre-cloned `repos/*/scripts/install.sh` included in the package.
+All platforms (Windows, macOS, Linux) clone `agent_pack.repo_url` at install time and copy out `repos/<product>/`. There is no longer a separate "bundled" install path — the Windows `.exe` and macOS `.pkg` bundle only the glue scripts, not the product sources.
 
 ### LLM Providers
 
@@ -120,9 +125,9 @@ Resulting config is written to `~/.hermes/config.yaml` and `~/.openclaw/openclaw
 
 ```text
 agent_pack/
-|- config/            # Single source of truth: defaults.json (URLs, LLM providers)
-|- shared/            # verify-llm.py (API-connectivity check)
-|- repos/             # Pre-cloned hermes-agent and openclaw, with skills bundled in
+|- config/            # Single source of truth: defaults.json (repo URL, mirrors, LLM providers)
+|- shared/            # verify-llm.py + fetch-agent-pack.sh (clones agent_pack with CN fallback)
+|- repos/             # Vendored hermes-agent and openclaw sources (with skills bundled in)
 |- windows/           # Inno Setup installer + PowerShell/WSL bridge scripts
 |- macos/             # .pkg builder + pre/postinstall scripts
 \- linux/             # Bash installer (install.sh + lib/)

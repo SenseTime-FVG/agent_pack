@@ -1,13 +1,13 @@
 Set-StrictMode -Version Latest
-$script:WslQueryError = ""
 $script:RegionChecked = $false
 $script:IsChinaRegion = $false
 
-# CN mirrors — shared with linux/lib/*.sh so user experience is consistent
+# CN mirrors — shared with linux/lib/*.sh so user experience is consistent.
+# GitHub proxies used by the source-tree fetch helper live in
+# config/defaults.json (agent_pack.cn_mirrors), not here.
 $script:CnNpmRegistry = "https://registry.npmmirror.com"
 $script:CnPipIndex = "https://mirrors.aliyun.com/pypi/simple/"
 $script:CnUvPythonMirror = "https://registry.npmmirror.com/-/binary/python-build-standalone"
-$script:GitHubProxies = @("https://gh-proxy.com/", "https://ghfast.top/", "https://mirror.ghproxy.com/")
 
 function Get-AgentPackLogDir {
     $logDir = Join-Path $env:LOCALAPPDATA "AgentPack\logs"
@@ -31,6 +31,24 @@ function Start-InstallLog {
 
 function Stop-InstallLog {
     try { Stop-Transcript | Out-Null } catch { }
+}
+
+# Keep the child console window open so the user can read the log when the
+# installer runs a script in a fresh cmd.exe window.  Inno Setup launches these
+# with `powershell.exe -File` directly (no cmd /k wrapper), so the window
+# closes as soon as the script exits — unless the script itself pauses.
+# Call this at the end of the script on failure paths (usually inside `trap`)
+# so successful runs don't block the overall installer flow.
+function Wait-ForKeyIfConsole {
+    param([string]$Message = "Press Enter to close this window...")
+    if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+        Write-Host ""
+        Write-Host $Message -ForegroundColor Yellow
+        try { [void]$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch {
+            # RawUI may not be available (e.g. redirected stdin); fall back.
+            try { [void](Read-Host) } catch { }
+        }
+    }
 }
 
 function Write-Step {
@@ -62,171 +80,72 @@ function Get-AgentPackRoot {
     return $parent
 }
 
-function Get-WslDistros {
-    $script:WslQueryError = ""
-    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
-    if (-not $wsl) {
-        $script:WslQueryError = "wsl.exe was not found."
-        return @()
-    }
-
-    # wsl.exe emits UTF-16 LE (little-endian) to stdout. PowerShell decodes
-    # child-process output using [Console]::OutputEncoding, which defaults to
-    # the system ANSI codepage (e.g. GBK on zh-CN Windows) — that mangles the
-    # output into garbage that looks like ASCII interleaved with NULs but is
-    # actually double-width misdecoded bytes.  Force Unicode for this call.
-    $previousEncoding = [Console]::OutputEncoding
-    try {
-        [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
-        $output = & wsl.exe --list --verbose 2>&1
-    } finally {
-        [Console]::OutputEncoding = $previousEncoding
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        $script:WslQueryError = "wsl.exe --list --verbose failed."
-        return @()
-    }
-
-    if (-not $output) {
-        $script:WslQueryError = "No WSL distro information was returned."
-        return @()
-    }
-
-    $distros = @()
-    foreach ($line in $output) {
-        # Strip BOM / stray NULs that may survive the encoding swap, plus any
-        # trailing CR left over from the Windows console.
-        $clean = ($line -replace "[`u{0000}`u{FEFF}]", "").Trim()
-        if (-not $clean) {
-            continue
-        }
-
-        if ($clean -match "^(?<default>\*)?\s*(?<name>\S.*?)\s{2,}\S+\s{2,}(?<version>\d+)\s*$") {
-            $distros += [pscustomobject]@{
-                Name      = $Matches.name.Trim()
-                Version   = [int]$Matches.version
-                IsDefault = ($Matches.default -eq "*")
-            }
-        }
-    }
-
-    return $distros
-}
-
-function Get-PreferredWslDistro {
-    $distros = Get-WslDistros
-    if (-not $distros) {
-        return $null
-    }
-
-    $default = $distros | Where-Object { $_.IsDefault } | Select-Object -First 1
-    if ($default -and $default.Version -eq 2) {
-        return $default
-    }
-
-    return $distros | Where-Object { $_.Version -eq 2 } | Select-Object -First 1
-}
-
+# Verify WSL2 is installed and the user's default distro is reachable.
+# We intentionally do NOT enumerate distros via `wsl --list --verbose` —
+# its UTF-16 output is unreliably decoded by PowerShell 5.1 on zh-CN systems
+# (empirically observed truncating "Ubuntu" to "bnt").  Instead we simply run
+# a smoke command in the default distro; if WSL is missing or the default
+# distro can't launch, wsl.exe returns a non-zero exit code and we surface
+# the matching install guidance.
 function Assert-Wsl2Ready {
     $installUrl = "https://learn.microsoft.com/windows/wsl/install"
 
-    $distros = Get-WslDistros
-    if (-not $distros) {
-        if ($script:WslQueryError -eq "wsl.exe was not found.") {
-            Write-Host ""
-            Write-Host "========================================================" -ForegroundColor Red
-            Write-Host "  WSL2 is required but not installed on this system." -ForegroundColor Red
-            Write-Host "========================================================" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  Please install WSL2 using one of the following methods:" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "  Option 1 - Run in PowerShell (Admin):" -ForegroundColor White
-            Write-Host "    wsl --install" -ForegroundColor Cyan
-            Write-Host ""
-            Write-Host "  Option 2 - Follow the guide:" -ForegroundColor White
-            Write-Host "    $installUrl" -ForegroundColor Cyan
-            Write-Host ""
-            Write-Host "  After installation and reboot, re-run the Agent Pack installer." -ForegroundColor Yellow
-            Write-Host ""
-            throw "WSL2 is required. Install guide: $installUrl"
-        }
-        if ($script:WslQueryError -eq "wsl.exe --list --verbose failed.") {
-            Write-Host ""
-            Write-Host "========================================================" -ForegroundColor Red
-            Write-Host "  WSL is installed but could not be queried." -ForegroundColor Red
-            Write-Host "========================================================" -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  WSL may need to be initialized or updated." -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "  Try running in PowerShell (Admin):" -ForegroundColor White
-            Write-Host "    wsl --update" -ForegroundColor Cyan
-            Write-Host ""
-            Write-Host "  More info: $installUrl" -ForegroundColor Cyan
-            Write-Host ""
-            throw "WSL query failed. See: $installUrl"
-        }
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if (-not $wsl) {
         Write-Host ""
         Write-Host "========================================================" -ForegroundColor Red
-        Write-Host "  No WSL Linux distribution found." -ForegroundColor Red
+        Write-Host "  WSL2 is required but not installed on this system." -ForegroundColor Red
         Write-Host "========================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "  WSL is installed but no Linux distro is available." -ForegroundColor Yellow
+        Write-Host "  Install WSL2 with (PowerShell as Administrator):" -ForegroundColor White
+        Write-Host "    wsl --install" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  Install a distro by running in PowerShell (Admin):" -ForegroundColor White
-        Write-Host "    wsl --install -d Ubuntu" -ForegroundColor Cyan
+        Write-Host "  Guide: $installUrl" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  Or install from Microsoft Store:" -ForegroundColor White
-        Write-Host "    https://aka.ms/wslstore" -ForegroundColor Cyan
-        Write-Host ""
-        throw "No WSL distro found. Install guide: $installUrl"
+        throw "WSL2 is required. Install guide: $installUrl"
     }
 
-    $chosen = Get-PreferredWslDistro
-    if (-not $chosen) {
-        $names = ($distros | ForEach-Object { "$($_.Name) (v$($_.Version))" }) -join ", "
+    # Smoke test: run a trivial command in the default distro.
+    # We don't pass -d: the user's default distro is what we target.
+    # Piping `$null` into wsl.exe avoids rare "device not ready" stdin issues.
+    $null | & wsl.exe -- bash -lc 'echo agent-pack-ready' 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         Write-Host "========================================================" -ForegroundColor Red
-        Write-Host "  No WSL version 2 distro found." -ForegroundColor Red
+        Write-Host "  WSL2 is installed but the default distro is not ready." -ForegroundColor Red
         Write-Host "========================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "  Current distros (all version 1): $names" -ForegroundColor Yellow
+        Write-Host "  Try one of these in PowerShell (Administrator):" -ForegroundColor White
+        Write-Host "    wsl --update" -ForegroundColor Cyan
+        Write-Host "    wsl --install -d Ubuntu       # if no distro is installed" -ForegroundColor Cyan
+        Write-Host "    wsl --set-default <DistroName>  # if the default is a v1 distro" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  Upgrade an existing distro to version 2:" -ForegroundColor White
-        Write-Host "    wsl --set-version <DistroName> 2" -ForegroundColor Cyan
+        Write-Host "  Then re-run the Agent Pack installer." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "  Or install a new WSL2 distro:" -ForegroundColor White
-        Write-Host "    wsl --install -d Ubuntu" -ForegroundColor Cyan
+        Write-Host "  Guide: $installUrl" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  More info: $installUrl" -ForegroundColor Cyan
-        Write-Host ""
-        throw "No WSL2 distro available. Install guide: $installUrl"
+        throw "WSL2 default distro is not reachable (wsl exit $LASTEXITCODE). See: $installUrl"
     }
-
-    return $chosen
 }
 
+# Invoke a bash command inside the user's default WSL distro.  The command
+# is passed through base64 so embedded quotes / newlines don't need shell
+# escaping on the wsl.exe command line.
 function Invoke-WslCommand {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$Command
-    )
+    param([Parameter(Mandatory)][string]$Command)
 
     $normalizedCommand = $Command -replace "`r`n?", "`n"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($normalizedCommand))
     $bashCommand = "printf '%s' '$encodedCommand' | base64 -d | bash"
 
-    & wsl.exe -d $Distro -- bash -lc $bashCommand
+    & wsl.exe -- bash -lc $bashCommand
     if ($LASTEXITCODE -ne 0) {
-        throw "WSL command failed in distro '$Distro' with exit code $LASTEXITCODE."
+        throw "WSL command failed in default distro with exit code $LASTEXITCODE."
     }
 }
 
 function Convert-WindowsPathToWslPath {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$WindowsPath
-    )
+    param([Parameter(Mandatory)][string]$WindowsPath)
 
     $fullWindowsPath = [System.IO.Path]::GetFullPath($WindowsPath)
     $normalizedWindowsPath = $fullWindowsPath -replace "\\", "/"
@@ -234,7 +153,7 @@ function Convert-WindowsPathToWslPath {
     $escapedWindowsPath = $normalizedWindowsPath.Replace("'", $bashSingleQuoteEscape)
     $bashCommand = "wslpath -a -- '$escapedWindowsPath'"
 
-    $converted = & wsl.exe -d $Distro -- bash -lc $bashCommand
+    $converted = & wsl.exe -- bash -lc $bashCommand
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to convert Windows path '$WindowsPath' to a WSL path."
     }
@@ -243,39 +162,24 @@ function Convert-WindowsPathToWslPath {
 }
 
 function Get-WslHomePath {
-    param([Parameter(Mandatory)][string]$Distro)
-
-    $home = & wsl.exe -d $Distro -- bash -lc 'printf %s "$HOME"'
-    if ($LASTEXITCODE -ne 0 -or -not $home) {
-        throw "Failed to determine the WSL home directory for '$Distro'."
+    $wslHome = & wsl.exe -- bash -lc 'printf %s "$HOME"'
+    if ($LASTEXITCODE -ne 0 -or -not $wslHome) {
+        throw "Failed to determine the WSL home directory."
     }
 
-    return ($home | Select-Object -Last 1).Trim()
+    return ($wslHome | Select-Object -Last 1).Trim()
 }
 
-function Get-WslUncPath {
-    param(
-        [Parameter(Mandatory)][string]$Distro,
-        [Parameter(Mandatory)][string]$LinuxPath
-    )
-
-    $trimmed = $LinuxPath.Trim()
-    if (-not $trimmed.StartsWith("/")) {
-        throw "Expected a Linux path starting with '/': $LinuxPath"
-    }
-
-    $suffix = $trimmed.TrimStart("/") -replace "/", "\"
-    if ([string]::IsNullOrWhiteSpace($suffix)) {
-        return "\\wsl$\$Distro"
-    }
-
-    return "\\wsl$\$Distro\$suffix"
-}
-
+# Resolve a Linux path in the default WSL distro to a Windows UNC path by
+# asking WSL itself (`wslpath -w`).  This avoids having to know the distro
+# name to build `\\wsl$\<distro>\...` manually.
 function Get-WslHomeUncPath {
-    param([Parameter(Mandatory)][string]$Distro)
+    $unc = & wsl.exe -- bash -lc 'wslpath -w -- "$HOME"'
+    if ($LASTEXITCODE -ne 0 -or -not $unc) {
+        throw "Failed to resolve the WSL home directory as a Windows path."
+    }
 
-    return Get-WslUncPath -Distro $Distro -LinuxPath (Get-WslHomePath -Distro $Distro)
+    return ($unc | Select-Object -Last 1).Trim()
 }
 
 function Test-IsChinaRegion {
@@ -319,25 +223,12 @@ export npm_config_registry='$script:CnNpmRegistry'
 "@
 }
 
-function Resolve-GitHubRawUrl {
-    # When in a China region, prepend a GitHub raw-content proxy so curl | bash
-    # of official install scripts (astral.sh -> GitHub, hermes/openclaw raw
-    # files) succeeds.  Falls through unchanged for non-github.com URLs.
-    param([Parameter(Mandatory)][string]$Url)
-
-    if (-not (Test-IsChinaRegion)) {
-        return $Url
-    }
-    if ($Url -notmatch '^https?://(raw\.githubusercontent\.com|github\.com|objects\.githubusercontent\.com)/') {
-        return $Url
-    }
-    return $script:GitHubProxies[0] + $Url
-}
-
+# Create .cmd + .ps1 launchers that invoke a command inside the user's
+# default WSL distro.  We deliberately don't hardcode a distro name so the
+# launcher keeps working even if the user later switches default distros.
 function New-WslCommandWrappers {
     param(
         [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$Distro,
         [Parameter(Mandatory)][string]$LinuxCommand
     )
 
@@ -354,7 +245,7 @@ param(
     [string[]]`$Arguments
 )
 
-`$invokeArgs = @('-d', '$Distro', '--', 'bash', '-lc', '$LinuxCommand', 'bash') + `$Arguments
+`$invokeArgs = @('--', 'bash', '-lc', '$LinuxCommand', 'bash') + `$Arguments
 & wsl.exe @invokeArgs
 exit `$LASTEXITCODE
 "@ | Set-Content -LiteralPath $ps1Path -Encoding UTF8
@@ -362,7 +253,7 @@ exit `$LASTEXITCODE
     @"
 @echo off
 setlocal
-wsl.exe -d "$Distro" -- bash -lc "$cmdLinuxCommand" bash %*
+wsl.exe -- bash -lc "$cmdLinuxCommand" bash %*
 exit /b %errorlevel%
 "@ | Set-Content -LiteralPath $cmdPath -Encoding ASCII
 

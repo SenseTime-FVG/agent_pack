@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Install Hermes Agent — delegates to the official installer script.
+# Install Hermes Agent by cloning the agent_pack monorepo and delegating to
+# repos/hermes-agent/scripts/install.sh with --source-ready.
 #
-# The official script (scripts/install.sh inside hermes-agent) handles all
-# dependency detection, venv creation, pip install, PATH setup, and config
-# templating.  We call it with --skip-setup so that Agent Pack's own LLM
-# configuration step runs instead of the interactive setup wizard.
-#
-# Environment variables consumed:
-#   HERMES_LOCAL_SOURCE  — path to a pre-cloned hermes-agent repo (bundled install)
+# Since agent_pack is now the source of truth for our vendored copy of
+# hermes-agent, we do NOT fall back to the upstream NousResearch repo.
+# Bundled/offline install is no longer supported — all platforms clone.
 
-HERMES_LOCAL_SOURCE="${HERMES_LOCAL_SOURCE:-}"
+_AP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+_AP_DEFAULTS_JSON="$_AP_ROOT/config/defaults.json"
+_AP_FETCH="$_AP_ROOT/shared/fetch-agent-pack.sh"
 
-# Read config from defaults.json
-_DEFAULTS_JSON="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/config/defaults.json"
-_hermes_get() { python3 -c "import json; print(json.load(open('$_DEFAULTS_JSON'))$1)" 2>/dev/null; }
-HERMES_INSTALL_URL="${HERMES_INSTALL_URL:-$(_hermes_get "['hermes']['install_script_url']")}"
+_hermes_get() { python3 -c "import json; print(json.load(open('$_AP_DEFAULTS_JSON'))$1)" 2>/dev/null; }
+
 HERMES_BRANCH="${HERMES_BRANCH:-$(_hermes_get "['hermes']['branch']")}"
+HERMES_INSTALL_DIR_DEFAULT="$(_hermes_get "['hermes']['install_dir']")"
+# defaults.json stores "$HOME/..." as a literal string; expand it here.
+HERMES_INSTALL_DIR="${HERMES_INSTALL_DIR:-${HERMES_INSTALL_DIR_DEFAULT//\$HOME/$HOME}}"
 
 install_hermes() {
     echo ""
@@ -23,31 +23,25 @@ install_hermes() {
     echo "  Installing Hermes Agent"
     echo "========================================"
 
-    if [ -n "$HERMES_LOCAL_SOURCE" ] && [ -d "$HERMES_LOCAL_SOURCE" ]; then
-        # ── Bundled source (Windows installer / offline) ──
-        local target_dir="$HOME/.hermes/hermes-agent"
-        if [ -d "$target_dir" ]; then
-            rm -rf "$target_dir"
-        fi
-        mkdir -p "$(dirname "$target_dir")"
-        cp -a "$HERMES_LOCAL_SOURCE" "$target_dir"
-
-        local install_script="$target_dir/scripts/install.sh"
-        if [ ! -f "$install_script" ]; then
-            echo "[!] ERROR: Bundled source does not contain scripts/install.sh"
-            echo "    Expected at: $install_script"
-            return 1
-        fi
-
-        echo "[*] Installing from bundled source..."
-        bash "$install_script" --skip-setup --dir "$target_dir" --branch "$HERMES_BRANCH"
-    else
-        # ── Online install — download and run the official script ──
-        echo "[*] Running official Hermes Agent installer..."
-        curl -fsSL "$HERMES_INSTALL_URL" \
-            | bash -s -- --skip-setup --branch "$HERMES_BRANCH"
+    if [ ! -x "$_AP_FETCH" ]; then
+        chmod +x "$_AP_FETCH" 2>/dev/null || true
     fi
 
+    echo "[*] Fetching hermes-agent source from agent_pack..."
+    if ! bash "$_AP_FETCH" "repos/hermes-agent" "$HERMES_INSTALL_DIR"; then
+        echo "[!] ERROR: Failed to fetch hermes-agent source."
+        return 1
+    fi
+
+    local install_script="$HERMES_INSTALL_DIR/scripts/install.sh"
+    if [ ! -f "$install_script" ]; then
+        echo "[!] ERROR: $install_script not found after fetch."
+        return 1
+    fi
+
+    echo "[*] Running hermes install.sh (--source-ready)..."
+    bash "$install_script" --source-ready --skip-setup \
+        --dir "$HERMES_INSTALL_DIR" --branch "$HERMES_BRANCH"
     local rc=$?
     if [ $rc -ne 0 ]; then
         echo "[!] ERROR: Hermes Agent installation failed (exit code $rc)."
