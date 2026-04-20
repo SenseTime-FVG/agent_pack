@@ -484,23 +484,16 @@ begin
   ScriptsDir := ExpandConstant('{app}') + '\scripts';
   SharedDir := ExpandConstant('{app}') + '\shared';
 
-  // Run the WSL2 readiness check in a visible console so the user can read the
-  // multi-line install guidance that Assert-Wsl2Ready prints on failure
-  // (wsl --install, Microsoft Store link, etc.).  With SW_HIDE those messages
-  // were invisible and the user only saw a vague "WSL2 is required" dialog.
+  // Run WSL2 readiness check + agent_pack prefetch in a visible console so
+  // the user can read the multi-line install guidance that Assert-Wsl2Ready
+  // prints on failure (wsl --install, Microsoft Store link, etc.) and watch
+  // the clone progress.  install-deps.ps1 does both steps so the later
+  // per-product installers can copy from a shared cache.
   ExecVisiblePwshWithRetry(
     ScriptsDir + '\install-deps.ps1',
-    'WSL2 is not ready. See the console window for install instructions, then click Retry. ' +
+    'WSL2 setup or agent_pack prefetch failed. See the console window for details, then click Retry. ' +
     'Typical fix: open PowerShell as Administrator and run `wsl --install` (then reboot).',
     GetAgentPackLogPath('install-deps'));
-
-  // Clone agent_pack once up front so install-hermes.ps1 and
-  // install-openclaw.ps1 can share a single source tree instead of each
-  // doing its own clone (halving network traffic when both are selected).
-  ExecVisiblePwshWithRetry(
-    ScriptsDir + '\prefetch-agent-pack.ps1',
-    'Failed to pre-fetch agent_pack sources inside WSL2.',
-    GetAgentPackLogPath('prefetch-agent-pack'));
 
   if HermesCheckbox.Checked then begin
     ExecVisiblePwshWithRetry(
