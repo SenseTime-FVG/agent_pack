@@ -141,7 +141,10 @@ function Invoke-WslCommand {
     $normalizedCommand = $Command -replace "`r`n?", "`n"
     $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($normalizedCommand))
 
-    $encodedCommand | & wsl.exe -- bash -lc 'base64 -d | bash'
+    # `base64 -d` is strict about whitespace; PowerShell's pipeline appends
+    # CRLF to the piped string, so -i (ignore non-alphabet chars) is required
+    # or base64 bails out with "invalid input".
+    $encodedCommand | & wsl.exe -- bash -lc 'base64 -d -i | bash'
     if ($LASTEXITCODE -ne 0) {
         throw "WSL command failed in default distro with exit code $LASTEXITCODE."
     }
