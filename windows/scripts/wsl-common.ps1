@@ -128,49 +128,39 @@ function Assert-Wsl2Ready {
     }
 }
 
-# Invoke a bash command inside the user's default WSL distro.  The command
-# is passed through base64 so embedded quotes / newlines don't need shell
-# escaping on the wsl.exe command line.
+# Invoke a bash command inside the user's default WSL distro.
 #
-# The base64 payload is written to a temp file rather than:
-#  - inlined into `-lc` (hits the Windows 32,767-char CreateProcess cap —
-#    PowerShell 5.1 raises IndexOutOfRangeException once the bash body plus
-#    CN mirror preamble pushes past the limit), or
-#  - piped via PowerShell stdin (stdin is consumed by base64 and closed, so
-#    interactive prompts inside the bash body — e.g. `git clone` asking
-#    for a GitHub username on a private repo — see EOF and can't read
-#    keyboard input).
-# Loading the payload from a file inside WSL keeps the outer bash's stdin
-# attached to the console, so prompts work.
+# The bash body is written to a Windows temp file as UTF-8 (LF line
+# endings, no BOM) and executed via `wsl.exe -- bash <wslpath>`.  We
+# deliberately avoid every alternative:
+#   - `bash -lc <long-string>` hits Windows' 32,767-char CreateProcess cap
+#     once the body plus CN mirror preamble grows; PowerShell 5.1 then
+#     raises IndexOutOfRangeException ("索引超出了数组界限").
+#   - Piping the script via PowerShell stdin closes stdin for any nested
+#     interactive prompt (e.g. `git clone` asking for credentials).
+#   - A base64 + `bash -lc 'decode | bash'` orchestrator trips wsl.exe's
+#     argv parser: `$(...)` inside the orchestrator string is mangled
+#     (command substitution result goes missing), which silently breaks
+#     things like `tmp=$(mktemp)`.
+# Running a plain file path as bash's only argument keeps every special
+# character inside the file, where bash — not wsl.exe — parses it.
 function Invoke-WslCommand {
     param([Parameter(Mandatory)][string]$Command)
 
     $normalizedCommand = $Command -replace "`r`n?", "`n"
-    $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($normalizedCommand))
 
-    $payloadFile = [System.IO.Path]::GetTempFileName()
+    $scriptFile = [System.IO.Path]::GetTempFileName()
     try {
-        # ASCII: base64 alphabet is 7-bit; avoid a UTF-8 BOM that would
-        # corrupt the first decoded byte.
-        [System.IO.File]::WriteAllText($payloadFile, $encodedCommand, [System.Text.Encoding]::ASCII)
-        $payloadWslPath = Convert-WindowsPathToWslPath -WindowsPath $payloadFile
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($scriptFile, $normalizedCommand, $utf8NoBom)
+        $scriptWslPath = Convert-WindowsPathToWslPath -WindowsPath $scriptFile
 
-        # Decode the payload into a temp bash script inside WSL, then run it
-        # with `bash <script>` so the script's stdin stays attached to the
-        # console (interactive git-credential prompts work).
-        #
-        # Avoid process substitution `bash <(...)` on the PowerShell side:
-        # wsl.exe 5.1 has mishandled Win32 argv strings containing `<(` and
-        # trips with "程序"wsl.exe"无法运行: 索引超出了数组界限".  Running
-        # the two-step decode + exec inside a single -lc string keeps every
-        # argument simple enough for wsl.exe's argv forwarding.
-        $bashScript = 'set -euo pipefail; tmp=$(mktemp); trap "rm -f $tmp" EXIT; base64 -d -i "$1" > "$tmp"; bash "$tmp"'
-        & wsl.exe -- bash -lc $bashScript _ $payloadWslPath
+        & wsl.exe -- bash $scriptWslPath
         if ($LASTEXITCODE -ne 0) {
             throw "WSL command failed in default distro with exit code $LASTEXITCODE."
         }
     } finally {
-        Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $scriptFile -Force -ErrorAction SilentlyContinue
     }
 }
 

@@ -119,18 +119,18 @@ echo ""
 echo "Selected: ${SELECTED_PRODUCTS[*]}"
 echo ""
 
-# ---- Step 3: Install Products ----
+# ---- Step 3: Install Products + Write Per-Product LLM Config ----
 # Both Hermes and OpenClaw delegate to their official install.sh scripts,
 # which handle all dependency detection and installation internally.
+# As soon as a product installs successfully we write its LLM config so a
+# later product's failure doesn't strand the working one without credentials.
 for prod in "${SELECTED_PRODUCTS[@]}"; do
     case "$prod" in
         hermes) install_hermes ;;
         openclaw) install_openclaw ;;
     esac
+    apply_llm_config_for "$prod"
 done
-
-# ---- Step 4: Write LLM Configuration ----
-apply_llm_config "${SELECTED_PRODUCTS[@]}"
 
 # ---- Done ----
 echo ""

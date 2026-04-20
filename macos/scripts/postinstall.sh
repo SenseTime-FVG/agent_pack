@@ -82,18 +82,16 @@ if ! bash "$SHARED_DIR/prefetch-agent-pack.sh" "$AGENT_PACK_CLONE_ROOT"; then
 fi
 export AGENT_PACK_CACHE_DIR="$AGENT_PACK_CLONE_ROOT"
 
-# Install products
-# Both Hermes and OpenClaw delegate to their official install.sh scripts,
-# which handle all dependency detection and installation internally.
+# Install products and write each product's LLM config right after its
+# install succeeds — so a later product's failure can't strand an already
+# installed one without credentials.
 for prod in "${SELECTED_PRODUCTS[@]}"; do
     case "$prod" in
         hermes) install_hermes ;;
         openclaw) install_openclaw ;;
     esac
+    apply_llm_config_for "$prod"
 done
-
-# Write LLM config now that install dirs / templates exist.
-apply_llm_config "${SELECTED_PRODUCTS[@]}"
 
 echo ""
 echo "========================================"

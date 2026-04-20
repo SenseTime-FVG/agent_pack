@@ -84,96 +84,101 @@ collect_llm_config() {
     LLM_API_KEY="$api_key"
 }
 
-apply_llm_config() {
-    local products=("$@")
-    local provider="$LLM_PROVIDER"
-    local base_url="$LLM_BASE_URL"
-    local model="$LLM_MODEL"
-    local api_key="$LLM_API_KEY"
-
-    echo ""
-    echo "========================================"
-    echo "  Writing LLM Configuration"
-    echo "========================================"
-
-    if [ -z "$api_key" ]; then
-        echo "WARNING: No API key was provided earlier. Skipping config write."
-        echo "         Re-run the installer or edit ~/.hermes/.env / ~/.openclaw/openclaw.json manually."
+# Called once per session (first time apply_llm_config_for runs).  Tracks
+# state so re-calling for a second product doesn't re-verify the same key.
+_LLM_VERIFIED_THIS_SESSION=0
+_llm_verify_once() {
+    if [ "$_LLM_VERIFIED_THIS_SESSION" -eq 1 ]; then
         return 0
     fi
+    _LLM_VERIFIED_THIS_SESSION=1
 
-    # Verify connection if python3 is available
     local python_cmd="${PYTHON_CMD:-python3}"
     if command -v "$python_cmd" &>/dev/null && [ -f "$SHARED_DIR/verify-llm.py" ]; then
         echo "[*] Verifying API connection..."
         if "$python_cmd" "$SHARED_DIR/verify-llm.py" \
-            --provider "$provider" \
-            --api-key "$api_key" \
-            --base-url "$base_url" \
-            --model "$model"; then
+            --provider "$LLM_PROVIDER" \
+            --api-key "$LLM_API_KEY" \
+            --base-url "$LLM_BASE_URL" \
+            --model "$LLM_MODEL"; then
             echo "[OK] Connection verified!"
         else
             echo "WARNING: Could not verify connection. Saving config anyway."
         fi
     fi
+}
 
-    for prod in "${products[@]}"; do
-        case "$prod" in
-            hermes)
-                # Hermes config layout:
-                #   ~/.hermes/config.yaml — structured template (model.provider,
-                #     model.default, model.base_url).  Hermes install.sh already
-                #     seeded this from cli-config.yaml.example; we only edit
-                #     the three keys in place so the rest of the template
-                #     (comments, unrelated sections) survives.
-                #   ~/.hermes/.env        — API keys, picked up at runtime.
-                # Previously we wrote a flat top-level YAML here, which hermes
-                # couldn't parse — the agent fell back to its auto-detect path
-                # with no credentials.
-                mkdir -p "$HOME/.hermes"
+# Write LLM config for a single product.  Intended to be called immediately
+# after that product's install.sh succeeds, so config lands even if a later
+# product fails to install.  Idempotent — safe to call more than once with
+# the same collected LLM_* values.
+apply_llm_config_for() {
+    local prod="$1"
+    local provider="$LLM_PROVIDER"
+    local base_url="$LLM_BASE_URL"
+    local model="$LLM_MODEL"
+    local api_key="$LLM_API_KEY"
 
-                local env_key
-                case "$provider" in
-                    openrouter) env_key="OPENROUTER_API_KEY" ;;
-                    openai)     env_key="OPENAI_API_KEY"     ;;
-                    anthropic)  env_key="ANTHROPIC_API_KEY"  ;;
-                    custom)     env_key="OPENAI_API_KEY"     ;;
-                    *)          env_key="OPENROUTER_API_KEY" ;;
-                esac
+    if [ -z "$api_key" ]; then
+        echo "[!] No API key collected — skipping $prod config write."
+        return 0
+    fi
 
-                local env_file="$HOME/.hermes/.env"
-                touch "$env_file"
-                chmod 600 "$env_file" 2>/dev/null || true
-                # Drop prior entries for the keys we're about to write so
-                # re-running the installer doesn't leave stale duplicates.
-                local keys_to_replace="$env_key"
-                if [ "$provider" = "custom" ]; then
-                    keys_to_replace="$env_key OPENAI_BASE_URL"
-                fi
-                for k in $keys_to_replace; do
-                    sed -i.bak "/^${k}=/d" "$env_file" 2>/dev/null || true
-                done
-                rm -f "$env_file.bak" 2>/dev/null || true
-                printf '%s=%s\n' "$env_key" "$api_key" >> "$env_file"
-                if [ "$provider" = "custom" ]; then
-                    printf 'OPENAI_BASE_URL=%s\n' "$base_url" >> "$env_file"
-                fi
+    _llm_verify_once
 
-                # Patch config.yaml's model block in place.  The template
-                # uses 2-space indent under `model:`; we target those keys
-                # specifically to avoid touching identically-named keys in
-                # other (commented) sections.
-                local cfg="$HOME/.hermes/config.yaml"
-                if [ -f "$cfg" ]; then
-                    python3 - "$cfg" "$provider" "$model" "$base_url" << 'PY'
+    case "$prod" in
+        hermes)
+            # Hermes config layout:
+            #   ~/.hermes/config.yaml — structured template (model.provider,
+            #     model.default, model.base_url).  Hermes install.sh already
+            #     seeded this from cli-config.yaml.example; we only edit
+            #     the three keys in place so the rest of the template
+            #     (comments, unrelated sections) survives.
+            #   ~/.hermes/.env        — API keys, picked up at runtime.
+            # Previously we wrote a flat top-level YAML here, which hermes
+            # couldn't parse — the agent fell back to its auto-detect path
+            # with no credentials.
+            mkdir -p "$HOME/.hermes"
+
+            local env_key
+            case "$provider" in
+                openrouter) env_key="OPENROUTER_API_KEY" ;;
+                openai)     env_key="OPENAI_API_KEY"     ;;
+                anthropic)  env_key="ANTHROPIC_API_KEY"  ;;
+                custom)     env_key="OPENAI_API_KEY"     ;;
+                *)          env_key="OPENROUTER_API_KEY" ;;
+            esac
+
+            local env_file="$HOME/.hermes/.env"
+            touch "$env_file"
+            chmod 600 "$env_file" 2>/dev/null || true
+            # Drop prior entries for the keys we're about to write so
+            # re-running the installer doesn't leave stale duplicates.
+            local keys_to_replace="$env_key"
+            if [ "$provider" = "custom" ]; then
+                keys_to_replace="$env_key OPENAI_BASE_URL"
+            fi
+            for k in $keys_to_replace; do
+                sed -i.bak "/^${k}=/d" "$env_file" 2>/dev/null || true
+            done
+            rm -f "$env_file.bak" 2>/dev/null || true
+            printf '%s=%s\n' "$env_key" "$api_key" >> "$env_file"
+            if [ "$provider" = "custom" ]; then
+                printf 'OPENAI_BASE_URL=%s\n' "$base_url" >> "$env_file"
+            fi
+
+            # Patch config.yaml's model block in place.  The template uses
+            # 2-space indent under `model:`; we target those keys specifically
+            # to avoid touching identically-named keys in commented sections.
+            local cfg="$HOME/.hermes/config.yaml"
+            if [ -f "$cfg" ]; then
+                python3 - "$cfg" "$provider" "$model" "$base_url" << 'PY'
 import re, sys
 path, provider, model, base_url = sys.argv[1:5]
 with open(path, 'r', encoding='utf-8') as f:
     text = f.read()
 
 def patch_key(src, key, value):
-    # Replace `  <key>: "..."` only on its first occurrence inside the
-    # top-level `model:` block, leaving comments and other sections alone.
     pattern = re.compile(
         r'(?m)^(?P<indent>  )(?P<key>' + re.escape(key) + r')\s*:\s*(?P<val>.*)$'
     )
@@ -183,8 +188,7 @@ def patch_key(src, key, value):
             return m.group(0)
         replaced['done'] = True
         return f'{m.group("indent")}{m.group("key")}: "{value}"'
-    new = pattern.sub(repl, src, count=1)
-    return new
+    return pattern.sub(repl, src, count=1)
 
 text = patch_key(text, 'default', model)
 text = patch_key(text, 'provider', provider)
@@ -193,22 +197,22 @@ text = patch_key(text, 'base_url', base_url)
 with open(path, 'w', encoding='utf-8') as f:
     f.write(text)
 PY
-                    echo "[OK] Hermes config patched at ~/.hermes/config.yaml"
-                else
-                    echo "[!] ~/.hermes/config.yaml not found — API key saved to .env but model/provider not set."
-                fi
-                echo "[OK] Hermes API key saved to ~/.hermes/.env ($env_key)"
-                ;;
-            openclaw)
-                mkdir -p "$HOME/.openclaw"
-                local provider_prefix
-                case "$provider" in
-                    openrouter) provider_prefix="openrouter" ;;
-                    openai) provider_prefix="openai" ;;
-                    anthropic) provider_prefix="anthropic" ;;
-                    *) provider_prefix="openai" ;;
-                esac
-                cat > "$HOME/.openclaw/openclaw.json" << JSON
+                echo "[OK] Hermes config patched at ~/.hermes/config.yaml"
+            else
+                echo "[!] ~/.hermes/config.yaml not found — API key saved to .env but model/provider not set."
+            fi
+            echo "[OK] Hermes API key saved to ~/.hermes/.env ($env_key)"
+            ;;
+        openclaw)
+            mkdir -p "$HOME/.openclaw"
+            local provider_prefix
+            case "$provider" in
+                openrouter) provider_prefix="openrouter" ;;
+                openai) provider_prefix="openai" ;;
+                anthropic) provider_prefix="anthropic" ;;
+                *) provider_prefix="openai" ;;
+            esac
+            cat > "$HOME/.openclaw/openclaw.json" << JSON
 {
   "agent": {
     "model": "${provider_prefix}/${model}"
@@ -220,9 +224,17 @@ PY
   }
 }
 JSON
-                echo "[OK] OpenClaw config written to ~/.openclaw/openclaw.json"
-                ;;
-        esac
+            echo "[OK] OpenClaw config written to ~/.openclaw/openclaw.json"
+            ;;
+    esac
+}
+
+# Batch helper kept for callers that wait until all installs are done
+# (e.g. the old single-step flow, or dry-run testing).  New code should
+# call apply_llm_config_for inside the install loop instead.
+apply_llm_config() {
+    for prod in "$@"; do
+        apply_llm_config_for "$prod"
     done
 }
 
