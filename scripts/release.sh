@@ -122,16 +122,24 @@ else
     git push origin "$TAG"
 fi
 
-# Default release notes come from the git log since the previous tag; if
-# the caller wants custom notes they pass --notes-file themselves.
+# Default release notes are produced by scripts/build-release-notes.sh —
+# same generator the CI workflow uses, so local and CI releases look
+# identical.  The caller can still override with --notes-file pointing at
+# their own file, in which case we skip generation.
 HAS_NOTES=0
 for f in "${GH_FLAGS[@]}"; do
     case "$f" in
         --notes|--notes-file|--generate-notes) HAS_NOTES=1 ;;
     esac
 done
+NOTES_TMP=""
 if [ "$HAS_NOTES" -eq 0 ]; then
-    GH_FLAGS+=(--generate-notes)
+    NOTES_TMP="$(mktemp -t agent-pack-release-notes.XXXXXX)"
+    # shellcheck disable=SC2064
+    trap "rm -f '$NOTES_TMP'" EXIT
+    note "Building release notes via scripts/build-release-notes.sh"
+    "$SCRIPT_DIR/build-release-notes.sh" "$TAG" > "$NOTES_TMP"
+    GH_FLAGS+=(--notes-file "$NOTES_TMP")
 fi
 
 note "Creating release $TAG with ${#FILES[@]} asset(s)"

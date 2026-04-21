@@ -77,11 +77,15 @@ jobs:
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
-      # Checkout so we can grab linux/install.sh for the Linux download.
-      # Nothing to build for Linux — install.sh bootstraps itself by
-      # cloning agent_pack on the user's machine, same shape as the
-      # curl | bash one-liner in the README.
+      # Checkout full history + tags so build-release-notes.sh below can
+      # diff against the previous tag.  linux/install.sh is also grabbed
+      # from this checkout and staged as a release asset (no build step —
+      # it bootstraps itself on the user's machine, same shape as the
+      # curl | bash one-liner in the README).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
@@ -120,12 +124,22 @@ jobs:
         # Cover all three platforms' downloads.
         run: sha256sum AgentPack-* > SHA256SUMS
 
+      - name: Build release notes
+        # Delegates to scripts/build-release-notes.sh — same script is used
+        # by scripts/release.sh for local releases, so CI and manual
+        # releases produce identical notes.  Honors a hand-written
+        # RELEASE_NOTES.md at repo root when present.
+        run: |
+          ./scripts/build-release-notes.sh "${{ steps.tag.outputs.tag }}" > RELEASE_NOTES_BODY.md
+          echo "---- Release notes ----"
+          cat RELEASE_NOTES_BODY.md
+
       - name: Create / update Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Agent Pack ${{ steps.tag.outputs.tag }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES_BODY.md
           # fail_on_unmatched_files keeps us honest if a build artifact
           # silently went missing before upload.
           fail_on_unmatched_files: true
