@@ -36,6 +36,29 @@ if [ -f /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
+# CN-region environment setup: mirror env vars (uv/pip/npm) + pre-installed uv.
+# Driven by AGENTPACK_CN=1 or a CN network probe. apply_tuna_apt_mirror is a
+# silent no-op on macOS (no /etc/os-release), so apply_cn_env is safe here.
+if [ -f "$SHARED_DIR/cn-env.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$SHARED_DIR/cn-env.sh"
+    _ap_cn_detected=0
+    case "${AGENTPACK_CN:-}" in
+        1|true|TRUE|yes|YES) _ap_cn_detected=1 ;;
+        0|false|FALSE|no|NO) _ap_cn_detected=0 ;;
+        *)
+            country="$(curl -fsSL --max-time 5 https://api.iping.cc/v1/query 2>/dev/null \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('country_code',''))" 2>/dev/null || true)"
+            [ "$country" = "CN" ] && _ap_cn_detected=1
+            ;;
+    esac
+    if [ "$_ap_cn_detected" -eq 1 ]; then
+        export AGENTPACK_CN=1
+        echo "[OK] Detected China network — using domestic mirrors (npm / pip / uv)"
+        apply_cn_env
+    fi
+fi
+
 echo ""
 echo "========================================"
 echo "  Agent Pack Setup"
