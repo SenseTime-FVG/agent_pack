@@ -31,6 +31,18 @@ jobs:
         # chocolatey is preinstalled on windows-latest runners.
         run: choco install -y innosetup
 
+      - name: Install unofficial ChineseSimplified.isl
+        # The chocolatey Inno Setup package ships official language packs
+        # only; installer.iss also loads the unofficial ChineseSimplified.isl,
+        # which must be dropped into the Languages/ folder manually.  Source:
+        #   https://github.com/jrsoftware/issrc/tree/main/Files/Languages/Unofficial
+        shell: pwsh
+        run: |
+          $dest = 'C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl'
+          $url  = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl'
+          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+          if (-not (Test-Path $dest)) { throw "Failed to download ChineseSimplified.isl" }
+
       - name: Build installer
         shell: pwsh
         working-directory: windows
