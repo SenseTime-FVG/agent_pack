@@ -9,22 +9,32 @@
 - 调用各产品的官方安装脚本，安装 Hermes Agent 和/或 OpenClaw
 - 配置 LLM 供应商（OpenRouter、OpenAI、Anthropic 或自定义端点）
 - 预置 Sensenova 技能库（已直接放在各产品的 `skills/` 目录中）
+- 安装结束后直接在当前窗口拉起 agent，省去手动重启 shell 的步骤
 
 ## 工作原理
 
-Agent Pack 是我们所维护的 Hermes Agent 和 OpenClaw 源码（位于 `repos/` 下）的**唯一真相源**。安装时各平台都会从 GitHub 重新克隆本 monorepo，拷出对应产品子目录，然后以 `--source-ready` 调用产品自带的 `scripts/install.sh`，让它跳过自己的 clone/pull、直接使用刚拷贝出来的源码。运行时依赖（Python、Node.js、uv、git、构建工具）仍由产品自带的安装脚本处理。
+Agent Pack 是我们所维护的 Hermes Agent 和 OpenClaw 源码（位于 `repos/` 下）的**唯一真相源**。安装时各平台都会从 GitHub 重新克隆本 monorepo（一次克隆、多个产品共享），拷出对应产品子目录，然后以 `--source-ready` 调用产品自带的 `scripts/install.sh`，让它跳过自己的 clone/pull、直接使用刚拷贝出来的源码。运行时依赖（Python、Node.js、uv、git、构建工具）仍由产品自带的安装脚本处理。
 
 ```
-Step 1: 选择产品 (Hermes / OpenClaw / 两者都要)
-Step 2: clone agent_pack、拷出 repos/<product>、运行其 install.sh
+Step 1: 先一次性收集 LLM 供应商凭据（提前问完所有交互问题）
+Step 2: 选择产品 (Hermes / OpenClaw / 两者都要)
+Step 3: clone agent_pack（共享一次）、拷出 repos/<product>、运行其 install.sh
         - Hermes:   install.sh --source-ready --skip-setup --dir <target>
         - OpenClaw: install.sh --install-method git --source-ready --git-dir <target> \
                                 --no-onboard --no-prompt
-Step 3: 写入 LLM 供应商配置
-        (~/.hermes/config.yaml, ~/.openclaw/openclaw.json)
+Step 4: 每个产品装完后立刻写入它自己的 LLM 配置
+        (~/.hermes/config.yaml, ~/.openclaw/openclaw.json；OpenClaw 这边走自己
+         的 CLI，同时把用户选的模型注册到 models.providers 里)
+Step 5: 在当前窗口直接拉起刚装好的 agent
+        - 只装 Hermes：    exec hermes
+        - 只装 OpenClaw：  exec openclaw gateway --verbose（顺带在浏览器打开 dashboard）
+        - 两个都装：       openclaw gateway 后台运行（日志在 ~/.openclaw/gateway.log），
+                          前台交给 hermes，OpenClaw dashboard 自动弹浏览器
 ```
 
 Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/openclaw/skills/` 中，随产品安装一起完成，无需单独的复制步骤。
+
+提前问完 LLM 配置意味着用户只需要交互一次，之后的长流程安装和最终的 agent 启动都无需看守。每装完一个产品立刻写它的配置，也保证另一个产品失败时已经装好的那个不会没凭据可用。
 
 ### 中国区镜像
 
@@ -46,9 +56,9 @@ Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/opencl
 
 | 平台 | 格式 | 使用方式 |
 |------|------|---------|
-| Windows | `.exe` 安装器 | 双击运行向导；安装过程在 WSL2 中执行 |
-| macOS | `.pkg` 安装器 | 双击后在自动打开的 Terminal 窗口中完成安装 |
-| Linux | bash 脚本 | `curl -fsSL https://URL/install.sh \| bash` |
+| Windows | `.exe` 安装器 | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
+| macOS | `.pkg` 安装器 | 双击后在自动打开的 Terminal 窗口中完成安装；安装结束后同一个窗口会变成 agent 的 REPL / gateway |
+| Linux | bash 脚本 | `curl -fsSL https://URL/install.sh \| bash` — 安装结束后会在当前 shell 里 `exec` 拉起 agent |
 
 ## 从源码构建
 

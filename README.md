@@ -9,21 +9,33 @@ Multi-platform one-click installer for [Hermes Agent](https://github.com/NousRes
 - Installs Hermes Agent and/or OpenClaw via each product's official installer
 - Configures an LLM provider (OpenRouter, OpenAI, Anthropic, or custom)
 - Ships with bundled Sensenova skills already placed inside each product's `skills/` directory
+- Launches the installed agent(s) automatically when setup finishes — no manual shell-restart step
 
 ## How It Works
 
-Agent Pack is the source of truth for its vendored copies of Hermes Agent and OpenClaw (under `repos/`). At install time, each installer clones this monorepo fresh from GitHub, copies out the relevant subdirectory, and invokes the bundled `scripts/install.sh` with `--source-ready` so it skips its own clone/pull and uses the freshly copied source. Runtime dependencies (Python, Node.js, uv, git, build tools) are still handled by the product installer.
+Agent Pack is the source of truth for its vendored copies of Hermes Agent and OpenClaw (under `repos/`). At install time, each installer clones this monorepo fresh from GitHub (once, shared across products), copies out the relevant subdirectory, and invokes the bundled `scripts/install.sh` with `--source-ready` so it skips its own clone/pull and uses the freshly copied source. Runtime dependencies (Python, Node.js, uv, git, build tools) are still handled by the product installer.
 
 ```
-Step 1: Select products (Hermes / OpenClaw / Both)
-Step 2: Clone agent_pack, copy out repos/<product>, run its install.sh
+Step 1: Collect LLM provider credentials up front (one interactive pass)
+Step 2: Select products (Hermes / OpenClaw / Both)
+Step 3: Clone agent_pack once, copy out repos/<product>, run its install.sh
         - Hermes:   install.sh --source-ready --skip-setup --dir <target>
         - OpenClaw: install.sh --install-method git --source-ready --git-dir <target> \
                                 --no-onboard --no-prompt
-Step 3: Write LLM provider config (~/.hermes/config.yaml, ~/.openclaw/openclaw.json)
+Step 4: Write LLM provider config per product immediately after it installs
+        (~/.hermes/config.yaml, ~/.openclaw/openclaw.json; OpenClaw is configured
+         via its own CLI, which also registers the model under models.providers)
+Step 5: Launch the installed agent(s) in the current window
+        - Hermes only:   exec hermes
+        - OpenClaw only: exec openclaw gateway --verbose (+ opens dashboard in browser)
+        - Both:          openclaw gateway runs in the background (log at
+                         ~/.openclaw/gateway.log), hermes takes over the foreground,
+                         and the OpenClaw dashboard opens in the browser
 ```
 
 Bundled skills live inside `repos/hermes-agent/skills/` and `repos/openclaw/skills/`, so they are installed as part of each product's normal install — no extra step needed.
+
+The up-front LLM prompt means the user only interacts once; the long-running installs and the final product launch then run unattended. Per-product config is written as soon as each install succeeds, so a later product's failure never strands a working one without credentials.
 
 ### China-region mirrors
 
@@ -45,9 +57,9 @@ Runtime dependencies (Python, Node.js, uv, git, build tools) are auto-installed 
 
 | Platform | Format | How to Use |
 |----------|--------|------------|
-| Windows | `.exe` installer | Double-click and follow the wizard; installation runs inside WSL2 |
-| macOS | `.pkg` installer | Double-click, then complete setup in the Terminal window that opens |
-| Linux | bash script | `curl -fsSL https://URL/install.sh \| bash` |
+| Windows | `.exe` installer | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
+| macOS | `.pkg` installer | Double-click, then complete setup in the Terminal window that opens; the same window becomes the agent's REPL / gateway once installation finishes |
+| Linux | bash script | `curl -fsSL https://URL/install.sh \| bash` — the shell that ran the installer is handed over to the agent via `exec` |
 
 ## Building from Source
 
