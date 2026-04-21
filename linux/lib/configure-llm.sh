@@ -43,30 +43,49 @@ collect_llm_config() {
     read -rp "Choice [1]: " choice
     choice="${choice:-1}"
 
-    local provider base_url model
+    local provider base_url default_model
     case "$choice" in
         1) provider="openrouter"
            base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
-           model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           default_model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
            ;;
         2) provider="openai"
            base_url="$(_cfg "['llm_providers']['openai']['base_url']")"
-           model="$(_cfg "['llm_providers']['openai']['default_model']")"
+           default_model="$(_cfg "['llm_providers']['openai']['default_model']")"
            ;;
         3) provider="anthropic"
            base_url="$(_cfg "['llm_providers']['anthropic']['base_url']")"
-           model="$(_cfg "['llm_providers']['anthropic']['default_model']")"
+           default_model="$(_cfg "['llm_providers']['anthropic']['default_model']")"
            ;;
         4) provider="custom"
            read -rp "Base URL: " base_url
-           read -rp "Model name: " model
+           default_model=""
            ;;
         *) echo "Invalid choice, defaulting to OpenRouter."
            provider="openrouter"
            base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
-           model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           default_model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
            ;;
     esac
+
+    # Model ID: let the user override the default (e.g. "gpt-4o" instead of
+    # "gpt-4o-mini", a specific OpenRouter route, a custom MiniMax id).  We
+    # intentionally accept any free-form string and don't whitelist — both
+    # Hermes and OpenClaw will surface a clear error at runtime if the id
+    # isn't recognized by the provider.  For custom endpoints we require a
+    # value (provider catalogs don't cover it); for bundled ones the default
+    # is usable out of the box.
+    local model=""
+    echo ""
+    if [ "$provider" = "custom" ]; then
+        while [ -z "$model" ]; do
+            read -rp "Model name (required for custom endpoint): " model
+            model="$(printf '%s' "$model" | tr -d '[:space:]')"
+        done
+    else
+        read -rp "Model ID [$default_model]: " model
+        model="${model:-$default_model}"
+    fi
 
     local signup_url
     signup_url="$(_cfg "['llm_providers']['$provider']['signup_url']")"
