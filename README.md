@@ -43,23 +43,55 @@ When the installer detects a China region (or `AGENTPACK_CN=1` is set), it prefi
 
 ## Platform Prerequisites
 
-Platform-level prerequisites are NOT auto-installed; the installer prompts the user to install them manually with a link.
+Platform-level prerequisites are **not** auto-installed — install them manually once, then run the Agent Pack installer. Runtime dependencies (Python, Node.js, uv, git, build tools) **are** auto-installed by the product installers, so you don't need those.
 
-| Platform | Prerequisite | Link |
-|----------|--------------|------|
-| Windows | WSL2 + a Linux distro | https://learn.microsoft.com/windows/wsl/install |
-| macOS | Xcode Command Line Tools | https://developer.apple.com/download/all/ |
-| macOS | Homebrew | https://brew.sh |
+### Windows
 
-Runtime dependencies (Python, Node.js, uv, git, build tools) are auto-installed by the product installers.
+Requires **WSL2 + a Linux distro** (the Inno Setup installer calls `wsl.exe` under the hood).
+
+1. Open **PowerShell as Administrator** and run:
+   ```powershell
+   wsl --install
+   ```
+2. **Reboot** when prompted.
+3. On first boot, Windows launches the new Ubuntu distro — set a UNIX username and password.
+4. (Optional, only if `wsl --install` didn't pick one) install a distro from the Microsoft Store, e.g. Ubuntu.
+
+Reference: <https://learn.microsoft.com/windows/wsl/install>
+
+### macOS
+
+Requires **Xcode Command Line Tools** (for `git`, `clang`) and **Homebrew** (used by the installer to `brew install` runtime deps).
+
+1. Install the Command Line Tools:
+   ```bash
+   xcode-select --install
+   ```
+2. Install Homebrew (skip if `brew --version` already prints a version):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+3. On Apple Silicon, add brew to your shell (the installer auto-sources this too, but do it once for your own shell):
+   ```bash
+   echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+   eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+
+References: <https://developer.apple.com/download/all/> · <https://brew.sh>
+
+### Linux
+
+No manual prerequisites — the installer handles `apt`/`yum` dependencies itself. You only need `bash`, `curl`, and `sudo` (standard on every mainstream distro).
 
 ## Download
 
-| Platform | Format | How to Use |
-|----------|--------|------------|
-| Windows | `.exe` installer | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
-| macOS | `.pkg` installer | Double-click, then complete setup in the Terminal window that opens; the same window becomes the agent's REPL / gateway once installation finishes |
-| Linux | bash script | `curl -fsSL https://URL/install.sh \| bash` — the shell that ran the installer is handed over to the agent via `exec` |
+Pre-built installers live on the [GitHub Releases page](https://github.com/SenseTime-FVG/agent_pack/releases/latest). Grab the one for your platform:
+
+| Platform | Download | How to Use |
+|----------|----------|------------|
+| Windows | [`AgentPack-Setup-1.0.0.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-Setup-1.0.0.exe) | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
+| macOS | [`AgentPack-1.0.0.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.0.pkg) | Double-click, then complete setup in the Terminal window that opens; the same window becomes the agent's REPL / gateway once installation finishes |
+| Linux | bash one-liner | `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — the shell that ran the installer is handed over to the agent via `exec` |
 
 ## Building from Source
 

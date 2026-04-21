@@ -42,23 +42,55 @@ Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/opencl
 
 ## 平台级前提
 
-平台级前提不会自动安装；安装器会提示用户自行安装并提供链接。
+平台级前提**不会**自动安装 —— 手动装一次，再运行 Agent Pack 安装器。运行时依赖（Python、Node.js、uv、git、构建工具）**会**由各产品的安装脚本自动处理，无需手动管。
 
-| 平台 | 前提 | 链接 |
-|------|------|------|
-| Windows | WSL2 + Linux 发行版 | https://learn.microsoft.com/windows/wsl/install |
-| macOS | Xcode Command Line Tools | https://developer.apple.com/download/all/ |
-| macOS | Homebrew | https://brew.sh |
+### Windows
 
-运行时依赖（Python、Node.js、uv、git、构建工具）由各产品的官方安装脚本自动安装。
+需要 **WSL2 + 一个 Linux 发行版**（Inno Setup 安装器底层通过 `wsl.exe` 执行所有操作）。
+
+1. **以管理员身份**打开 PowerShell，运行：
+   ```powershell
+   wsl --install
+   ```
+2. 按提示**重启**电脑。
+3. 重启后 Windows 会启动新装的 Ubuntu —— 按提示设置 UNIX 用户名和密码。
+4. （可选，仅当 `wsl --install` 没有自动选一个发行版时）从 Microsoft Store 装一个，比如 Ubuntu。
+
+参考：<https://learn.microsoft.com/windows/wsl/install>
+
+### macOS
+
+需要 **Xcode Command Line Tools**（提供 `git`、`clang`）和 **Homebrew**（安装器用 `brew install` 拉运行时依赖）。
+
+1. 装 Command Line Tools：
+   ```bash
+   xcode-select --install
+   ```
+2. 装 Homebrew（如果 `brew --version` 已经能输出版本号就跳过）：
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+3. Apple Silicon 机器需要把 brew 加到 shell 启动文件里（安装器内部也会自动 source，但自己 shell 也装一下方便日常使用）：
+   ```bash
+   echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+   eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+
+参考：<https://developer.apple.com/download/all/> · <https://brew.sh>
+
+### Linux
+
+没有需要手动装的前提 —— `apt`/`yum` 相关的依赖安装器自己处理。只需要系统自带的 `bash`、`curl` 和 `sudo`（主流发行版标配）。
 
 ## 下载
 
-| 平台 | 格式 | 使用方式 |
+预编译的安装器发布在 [GitHub Releases 页面](https://github.com/SenseTime-FVG/agent_pack/releases/latest)，挑自己平台的那一个：
+
+| 平台 | 下载 | 使用方式 |
 |------|------|---------|
-| Windows | `.exe` 安装器 | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
-| macOS | `.pkg` 安装器 | 双击后在自动打开的 Terminal 窗口中完成安装；安装结束后同一个窗口会变成 agent 的 REPL / gateway |
-| Linux | bash 脚本 | `curl -fsSL https://URL/install.sh \| bash` — 安装结束后会在当前 shell 里 `exec` 拉起 agent |
+| Windows | [`AgentPack-Setup-1.0.0.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-Setup-1.0.0.exe) | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
+| macOS | [`AgentPack-1.0.0.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.0.pkg) | 双击后在自动打开的 Terminal 窗口中完成安装；安装结束后同一个窗口会变成 agent 的 REPL / gateway |
+| Linux | bash 一行命令 | `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — 安装结束后会在当前 shell 里 `exec` 拉起 agent |
 
 ## 从源码构建
 
