@@ -4,6 +4,12 @@
 
 set -e
 
+POSTINSTALL_LOG="/private/tmp/agent-pack-postinstall.log"
+mkdir -p "$(dirname "$POSTINSTALL_LOG")"
+exec >>"$POSTINSTALL_LOG" 2>&1
+echo ""
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Agent Pack macOS postinstall"
+
 INSTALL_DIR="/usr/local/lib/agent-pack"
 SHARED_DIR="$INSTALL_DIR/shared"
 CONFIG_DIR="$INSTALL_DIR/config"

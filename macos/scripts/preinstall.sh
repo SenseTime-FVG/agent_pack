@@ -6,6 +6,14 @@ set -e
 
 echo "[Agent Pack] Pre-install: checking prerequisites..."
 
+# Installer runs with a stripped PATH on many macOS systems, so expose common
+# Homebrew locations before checking for brew.
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+fi
+
 # Xcode Command Line Tools
 if ! xcode-select -p &>/dev/null; then
     echo ""
