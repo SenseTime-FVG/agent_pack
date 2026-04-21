@@ -1,0 +1,107 @@
+name: Release
+
+# Triggered when a semver tag (v1.0.0, v1.2.3-beta) is pushed.
+# Builds the Windows .exe and macOS .pkg in parallel on platform-native
+# runners, then attaches both to the GitHub Release for that tag (creating
+# the Release if the tag was pushed without one).
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  # Also allow a manual trigger from the Actions tab for dry runs.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Required for workflow_dispatch."
+        required: true
+        type: string
+
+permissions:
+  # Needed so the release job can create / upload to a Release.
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        # chocolatey is preinstalled on windows-latest runners.
+        run: choco install -y innosetup
+
+      - name: Build installer
+        shell: pwsh
+        working-directory: windows
+        run: iscc installer.iss
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/AgentPack-Setup-*.exe
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS .pkg
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .pkg
+        working-directory: macos
+        run: ./build-pkg.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist/AgentPack-*.pkg
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-exe
+          path: dist
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist
+
+      - name: Resolve tag
+        id: tag
+        # On tag pushes, github.ref_name is the tag (e.g. v1.0.0).
+        # On workflow_dispatch, the user-supplied input is the tag.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum AgentPack-* > SHA256SUMS
+
+      - name: Create / update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Agent Pack ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          # fail_on_unmatched_files keeps us honest if a build artifact
+          # silently went missing before upload.
+          fail_on_unmatched_files: true
+          files: |
+            dist/AgentPack-Setup-*.exe
+            dist/AgentPack-*.pkg
+            dist/SHA256SUMS
