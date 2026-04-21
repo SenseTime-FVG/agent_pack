@@ -83,10 +83,28 @@ install_openclaw() {
     # Without this, launching the gateway fails with:
     #   Gateway start blocked: set gateway.mode=local (current: unset)
     # `openclaw config set` is idempotent; re-running the installer is safe.
-    # Use $child_path for the lookup too, because openclaw was just installed
-    # to $npm_prefix/bin which may not be on the outer shell's PATH yet.
-    if PATH="$child_path" command -v openclaw >/dev/null 2>&1; then
-        if ! PATH="$child_path" openclaw config set gateway.mode local >/dev/null 2>&1; then
+    #
+    # Locating the freshly-installed openclaw binary is fiddly: bash caches
+    # PATH lookups (`hash`) within the shell, npm's global prefix may differ
+    # from the default PATH, and under WSL $child_path has been pruned of
+    # /mnt/*.  Build a broad candidate list and take whichever one exists.
+    hash -r 2>/dev/null || true
+    local openclaw_bin=""
+    local cand
+    for cand in \
+        "$(PATH="$child_path" command -v openclaw 2>/dev/null)" \
+        "${npm_prefix:+$npm_prefix/bin/openclaw}" \
+        "$HOME/.local/bin/openclaw" \
+        "/usr/local/bin/openclaw" \
+        "/usr/bin/openclaw"; do
+        if [ -n "$cand" ] && [ -x "$cand" ]; then
+            openclaw_bin="$cand"
+            break
+        fi
+    done
+
+    if [ -n "$openclaw_bin" ]; then
+        if ! PATH="$child_path" "$openclaw_bin" config set gateway.mode local >/dev/null 2>&1; then
             echo "[!] Could not set gateway.mode=local automatically."
             echo "    Run: openclaw config set gateway.mode local"
         fi

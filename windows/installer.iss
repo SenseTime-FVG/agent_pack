@@ -502,9 +502,13 @@ begin
   if Trim(ModelEdit.Text) <> '' then begin
     Args := Args + ' -Model "' + ModelEdit.Text + '"';
   end;
-  if ProviderRadios[3].Checked then begin
-    Args := Args + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
-  end;
+  // Always forward BaseUrl, not just for custom providers — OpenClaw's
+  // `models.providers.<name>.baseUrl` is required (fails schema validation
+  // with "Too small: expected string to have >=1 character" otherwise).
+  // For bundled providers BaseUrlEdit.Text was pre-seeded by
+  // UpdateProviderFieldLayout via GetDefaultBaseUrl, so this is always a
+  // non-empty string.
+  Args := Args + ' -BaseUrl "' + BaseUrlEdit.Text + '"';
   Result := Args;
 end;
 

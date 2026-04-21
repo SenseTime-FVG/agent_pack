@@ -126,6 +126,19 @@ apply_llm_config_for() {
         return 0
     fi
 
+    # Belt-and-suspenders: fill empty base_url / model from defaults.json so
+    # callers that forget to pass them (e.g. an older Windows wizard that
+    # only forwarded -BaseUrl for custom) don't write schema-invalid config.
+    # OpenClaw rejects models.providers.<name>.baseUrl="" with "Too small:
+    # expected string to have >=1 character" — this prevents the CLI call
+    # from blowing up the whole install.
+    if [ -z "$base_url" ] && [ "$provider" != "custom" ]; then
+        base_url="$(_cfg "['llm_providers']['$provider']['base_url']")"
+    fi
+    if [ -z "$model" ] && [ "$provider" != "custom" ]; then
+        model="$(_cfg "['llm_providers']['$provider']['default_model']")"
+    fi
+
     _llm_verify_once
 
     case "$prod" in
@@ -257,6 +270,10 @@ PY
             fi
             echo "[OK] OpenClaw API key saved to ~/.openclaw/.env ($env_key)"
 
+            # Clear bash's PATH-lookup cache: openclaw was just installed
+            # by install_openclaw in the same shell, but an earlier failed
+            # lookup may have cached a negative result.
+            hash -r 2>/dev/null || true
             if ! command -v openclaw >/dev/null 2>&1; then
                 echo "[!] openclaw CLI not on PATH — skipping model default."
                 echo "    Run 'openclaw config set agents.defaults.model \"${provider_prefix}/${model}\"' after launching a new shell."
