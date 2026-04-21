@@ -1,0 +1,26 @@
+# Line-ending policy for agent_pack's own files.
+#
+# The root .gitattributes only governs files we author directly (installers,
+# shared helpers, CI scripts, docs).  Vendored upstreams under repos/ bring
+# their own .gitattributes and their own line-ending conventions — we
+# deliberately do NOT touch those, to keep vendored diffs clean.
+
+# Installer scripts and shared helpers — must be LF so WSL bash / macOS bash
+# don't choke on \r tokens (see the CRLF-pollution pitfall in our runbooks).
+/linux/**/*.sh              text eol=lf
+/macos/**/*.sh              text eol=lf
+/shared/**/*.sh             text eol=lf
+/scripts/**/*.sh            text eol=lf
+
+# Python helpers shipped inside the installer payload.
+/shared/**/*.py             text eol=lf
+
+# Windows-side glue — PowerShell + Inno Setup prefer CRLF.
+/windows/**/*.ps1           text eol=crlf
+/windows/**/*.iss           text eol=crlf
+
+# Config and docs at repo root — keep LF for cross-platform diff stability.
+/config/**/*.json           text eol=lf
+/.github/**/*.yml           text eol=lf
+/.github/**/*.yaml          text eol=lf
+*.md                        text eol=lf
