@@ -88,6 +88,14 @@ docs/internal/
 tmp/
 IDENTITY.md
 USER.md
+# Keep the packaged workspace templates — the ignore rules above are meant
+# for user-generated files inside runtime workspaces, not the distributed
+# template copies that openclaw reads at runtime (see
+# src/agents/workspace-templates.ts).  Without these exceptions, `git clone`
+# produces an incomplete install tree and `openclaw` fails at startup with:
+#   Missing workspace template: IDENTITY.md (.../docs/reference/templates/IDENTITY.md)
+!docs/reference/templates/IDENTITY.md
+!docs/reference/templates/USER.md
 .tgz
 .idea
 
