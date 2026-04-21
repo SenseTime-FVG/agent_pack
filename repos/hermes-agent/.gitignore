@@ -68,3 +68,12 @@ mini-swe-agent/
 .nix-stamps/
 result
 website/static/api/skills-index.json
+
+# Keep skill assets that the global `export*` + `examples/` rules above
+# unintentionally swallow.  These files are read at runtime by the skills
+# themselves (p5js export pipeline, concept-diagrams few-shot examples),
+# so a fresh clone without them ships broken skills.
+!skills/creative/p5js/scripts/export-frames.js
+!skills/creative/p5js/references/export-pipeline.md
+!optional-skills/creative/concept-diagrams/examples/
+!optional-skills/creative/concept-diagrams/examples/*.md

@@ -96,6 +96,15 @@ USER.md
 #   Missing workspace template: IDENTITY.md (.../docs/reference/templates/IDENTITY.md)
 !docs/reference/templates/IDENTITY.md
 !docs/reference/templates/USER.md
+!docs/zh-CN/reference/templates/IDENTITY.md
+!docs/zh-CN/reference/templates/USER.md
+# The `bin/` rule above (around line 43) was intended for build output like
+# bin/clawdbot-mac, but it also swallows skill entrypoint scripts such as
+# skills/sherpa-onnx-tts/bin/sherpa-onnx-tts.  Git won't re-include a file
+# inside an excluded directory unless the directory itself is re-included
+# first, so whitelist both.
+!skills/sherpa-onnx-tts/bin/
+!skills/sherpa-onnx-tts/bin/sherpa-onnx-tts
 .tgz
 .idea
 
