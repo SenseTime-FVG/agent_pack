@@ -52,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
-          path: dist/AgentPack-Setup-*.exe
+          path: dist/AgentPack-*-windows-*.exe
           if-no-files-found: error
 
   build-macos:
@@ -69,7 +69,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-pkg
-          path: dist/AgentPack-*.pkg
+          path: dist/AgentPack-*-macos-*.pkg
           if-no-files-found: error
 
   release:
@@ -77,6 +77,12 @@ jobs:
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
+      # Checkout so we can grab linux/install.sh for the Linux download.
+      # Nothing to build for Linux — install.sh bootstraps itself by
+      # cloning agent_pack on the user's machine, same shape as the
+      # curl | bash one-liner in the README.
+      - uses: actions/checkout@v4
+
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
@@ -89,19 +95,29 @@ jobs:
           name: macos-pkg
           path: dist
 
-      - name: Resolve tag
+      - name: Resolve tag and version
         id: tag
         # On tag pushes, github.ref_name is the tag (e.g. v1.0.0).
         # On workflow_dispatch, the user-supplied input is the tag.
+        # Also expose the bare version (no leading v) — build-pkg.sh and
+        # installer.iss both hard-code "1.0.0" internally and we match that.
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            tag="${{ inputs.tag }}"
           else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            tag="${{ github.ref_name }}"
           fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage Linux installer
+        # Rename to AgentPack-<ver>-linux.sh so all three downloads share
+        # the same "AgentPack-<ver>-<platform>[-<arch>].<ext>" shape.
+        run: cp linux/install.sh "dist/AgentPack-${{ steps.tag.outputs.version }}-linux.sh"
 
       - name: Generate checksums
         working-directory: dist
+        # Cover all three platforms' downloads.
         run: sha256sum AgentPack-* > SHA256SUMS
 
       - name: Create / update Release
@@ -114,6 +130,7 @@ jobs:
           # silently went missing before upload.
           fail_on_unmatched_files: true
           files: |
-            dist/AgentPack-Setup-*.exe
-            dist/AgentPack-*.pkg
+            dist/AgentPack-*-windows-*.exe
+            dist/AgentPack-*-macos-*.pkg
+            dist/AgentPack-*-linux.sh
             dist/SHA256SUMS

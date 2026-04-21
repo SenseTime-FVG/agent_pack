@@ -33,10 +33,10 @@ productbuild \
     --distribution "$SCRIPT_DIR/distribution.xml" \
     --resources "$SCRIPT_DIR/resources" \
     --package-path "$BUILD_DIR" \
-    "$DIST_DIR/AgentPack-$VERSION.pkg"
+    "$DIST_DIR/AgentPack-$VERSION-macos-universal.pkg"
 
 echo ""
-echo "Built: $DIST_DIR/AgentPack-$VERSION.pkg"
+echo "Built: $DIST_DIR/AgentPack-$VERSION-macos-universal.pkg"
 
 # Cleanup
 rm -rf "$BUILD_DIR"

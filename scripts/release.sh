@@ -10,7 +10,7 @@
 #   scripts/release.sh v1.0.0 --notes-file RELEASE_NOTES.md
 #
 # What it does:
-#   1. Verifies dist/AgentPack-Setup-<ver>.exe exists (mandatory).
+#   1. Verifies dist/AgentPack-<ver>-windows-x64.exe exists (mandatory).
 #   2. Includes dist/AgentPack-<ver>.pkg if present (skipped with a warning
 #      otherwise — you can re-run with --include-pkg-only after you build
 #      the .pkg on a Mac, and `gh release upload` will add it then).
@@ -56,10 +56,17 @@ command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
     || die "sha256sum / shasum not found."
 
 # Extract the version from the tag (strip leading v).  We use it to locate
-# files by exact name, so a tag like v1.0.0 must match AgentPack-Setup-1.0.0.exe.
+# files by exact name, so a tag like v1.0.0 must match the
+# AgentPack-1.0.0-<platform>[-<arch>].<ext> naming produced by the builders.
 VER="${TAG#v}"
-EXE="$DIST_DIR/AgentPack-Setup-${VER}.exe"
-PKG="$DIST_DIR/AgentPack-${VER}.pkg"
+EXE="$DIST_DIR/AgentPack-${VER}-windows-x64.exe"
+PKG="$DIST_DIR/AgentPack-${VER}-macos-universal.pkg"
+# Stage the Linux installer next to the other artifacts.  linux/install.sh
+# is a self-bootstrapping script — if the user downloads just this file and
+# runs it, it'll clone agent_pack on its own (same shape as the curl | bash
+# one-liner in the README) — so nothing to build, just copy + rename.
+LINUX_SRC="$PROJECT_ROOT/linux/install.sh"
+LINUX_DST="$DIST_DIR/AgentPack-${VER}-linux.sh"
 
 # Collect whatever's actually built.  The .exe is required — releasing
 # without the Windows installer would mean the README links 404 on Windows.
@@ -76,6 +83,13 @@ else
     echo "    Build it on a Mac with: cd macos && ./build-pkg.sh" >&2
     echo "    Then: gh release upload $TAG '$PKG' --clobber" >&2
 fi
+
+# Linux installer: copy from linux/ into dist/ so SHA256SUMS and gh upload
+# both see it under a flat, versionless name.
+[ -f "$LINUX_SRC" ] || die "Missing $LINUX_SRC (unexpected — it's tracked in git)."
+cp "$LINUX_SRC" "$LINUX_DST"
+FILES+=("$LINUX_DST")
+ok "Staged $(basename "$LINUX_DST") (from linux/install.sh)"
 
 # Generate checksums for everything we're about to upload.
 CHECKSUMS="$DIST_DIR/SHA256SUMS"
