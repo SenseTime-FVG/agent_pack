@@ -295,7 +295,7 @@ PY
             hash -r 2>/dev/null || true
             if ! command -v openclaw >/dev/null 2>&1; then
                 echo "[!] openclaw CLI not on PATH — skipping model default."
-                echo "    Run 'openclaw config set agents.defaults.model \"${provider_prefix}/${model}\"' after launching a new shell."
+                echo "    Run 'openclaw models set \"${provider_prefix}/${model}\"' after launching a new shell."
                 return 0
             fi
 

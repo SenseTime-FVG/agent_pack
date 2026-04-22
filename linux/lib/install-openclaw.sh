@@ -71,18 +71,19 @@ install_openclaw() {
     # which unfolds every run_quiet_step (default behavior hides stdout/stderr
     # unless the step fails, and even then only tail -n 80 is emitted — which
     # has repeatedly hidden real root causes for us).
-    local verbose_arg=()
+    local install_args=(
+        --install-method git
+        --source-ready
+        --git-dir "$OPENCLAW_INSTALL_DIR"
+        --no-onboard
+        --no-prompt
+    )
     if [ "${AGENTPACK_VERBOSE:-0}" = "1" ]; then
-        verbose_arg=(--verbose)
+        install_args+=(--verbose)
     fi
 
     PATH="$child_path" OPENCLAW_VERBOSE="${AGENTPACK_VERBOSE:-0}" \
-        bash "$install_script" \
-            --install-method git \
-            --source-ready \
-            --git-dir "$OPENCLAW_INSTALL_DIR" \
-            --no-onboard --no-prompt \
-            "${verbose_arg[@]}"
+        bash "$install_script" "${install_args[@]}"
     local rc=$?
     if [ $rc -ne 0 ]; then
         echo "[!] ERROR: OpenClaw installation failed (exit code $rc)."
