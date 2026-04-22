@@ -105,6 +105,153 @@ collect_llm_config() {
     LLM_API_KEY="$api_key"
 }
 
+_LLM_VERIFY_CMD=()
+_llm_prepare_verify_cmd() {
+    _LLM_VERIFY_CMD=()
+
+    if [ "${DISTRO_ID:-}" = "macos" ] && command -v curl &>/dev/null \
+        && [ -f "$SHARED_DIR/verify-llm-curl.sh" ]; then
+        _LLM_VERIFY_CMD=(
+            bash "$SHARED_DIR/verify-llm-curl.sh"
+            --provider "$LLM_PROVIDER"
+            --api-key "$LLM_API_KEY"
+            --base-url "$LLM_BASE_URL"
+            --model "$LLM_MODEL"
+        )
+        return 0
+    fi
+
+    local python_cmd="${PYTHON_CMD:-python3}"
+    if command -v "$python_cmd" &>/dev/null && [ -f "$SHARED_DIR/verify-llm.py" ]; then
+        _LLM_VERIFY_CMD=(
+            "$python_cmd" "$SHARED_DIR/verify-llm.py"
+            --provider "$LLM_PROVIDER"
+            --api-key "$LLM_API_KEY"
+            --base-url "$LLM_BASE_URL"
+            --model "$LLM_MODEL"
+        )
+        return 0
+    fi
+
+    if command -v curl &>/dev/null && [ -f "$SHARED_DIR/verify-llm-curl.sh" ]; then
+        _LLM_VERIFY_CMD=(
+            bash "$SHARED_DIR/verify-llm-curl.sh"
+            --provider "$LLM_PROVIDER"
+            --api-key "$LLM_API_KEY"
+            --base-url "$LLM_BASE_URL"
+            --model "$LLM_MODEL"
+        )
+        return 0
+    fi
+
+    return 1
+}
+
+_llm_run_verify() {
+    local output="" rc=0
+
+    if ! _llm_prepare_verify_cmd; then
+        echo "WARNING: No LLM verification helper is available on this machine." >&2
+        return 2
+    fi
+
+    set +e
+    output="$("${_LLM_VERIFY_CMD[@]}" 2>&1)"
+    rc=$?
+    set -e
+
+    if [ -n "$output" ]; then
+        printf '%s\n' "$output"
+    fi
+
+    return "$rc"
+}
+
+verify_llm_config_interactive() {
+    local provider_name choice fail_choice
+
+    if [ -z "$LLM_API_KEY" ]; then
+        echo "[*] No API key entered — skipping pre-install verification."
+        return 0
+    fi
+
+    provider_name="$(_cfg "['llm_providers']['$LLM_PROVIDER']['name']")"
+    if [ -z "$provider_name" ]; then
+        provider_name="$LLM_PROVIDER"
+    fi
+
+    while true; do
+        echo ""
+        echo "----------------------------------------"
+        echo "  Verify LLM Connection"
+        echo "----------------------------------------"
+        echo "  Provider: $provider_name"
+        echo "  Model:    $LLM_MODEL"
+        if [ -n "$LLM_BASE_URL" ]; then
+            echo "  Base URL: $LLM_BASE_URL"
+        fi
+        echo ""
+        read -rp "Verify the connection now? [Y/n/e=edit/c=cancel]: " choice
+        choice="${choice:-y}"
+
+        case "${choice,,}" in
+            y|yes)
+                echo "[*] Verifying API connection..."
+                if _llm_run_verify; then
+                    echo "[OK] Connection verified!"
+                    _LLM_VERIFIED_THIS_SESSION=1
+                    return 0
+                fi
+
+                echo ""
+                read -rp "Verification failed. [r]etry, [e]dit settings, [c]ontinue anyway, or [q]uit? [r]: " fail_choice
+                fail_choice="${fail_choice:-r}"
+                case "${fail_choice,,}" in
+                    e|edit)
+                        collect_llm_config
+                        if [ -z "$LLM_API_KEY" ]; then
+                            echo "[*] No API key entered — skipping pre-install verification."
+                            return 0
+                        fi
+                        provider_name="$(_cfg "['llm_providers']['$LLM_PROVIDER']['name']")"
+                        [ -z "$provider_name" ] && provider_name="$LLM_PROVIDER"
+                        ;;
+                    c|continue)
+                        echo "[!] Continuing without a successful verification."
+                        return 0
+                        ;;
+                    q|quit)
+                        echo "[!] Installation canceled."
+                        return 1
+                        ;;
+                    *)
+                        ;;
+                esac
+                ;;
+            n|no)
+                echo "[*] Skipping pre-install verification."
+                return 0
+                ;;
+            e|edit)
+                collect_llm_config
+                if [ -z "$LLM_API_KEY" ]; then
+                    echo "[*] No API key entered — skipping pre-install verification."
+                    return 0
+                fi
+                provider_name="$(_cfg "['llm_providers']['$LLM_PROVIDER']['name']")"
+                [ -z "$provider_name" ] && provider_name="$LLM_PROVIDER"
+                ;;
+            c|cancel|q|quit)
+                echo "[!] Installation canceled."
+                return 1
+                ;;
+            *)
+                echo "Please answer y, n, e, or c."
+                ;;
+        esac
+    done
+}
+
 # Called once per session (first time apply_llm_config_for runs).  Tracks
 # state so re-calling for a second product doesn't re-verify the same key.
 _LLM_VERIFIED_THIS_SESSION=0
@@ -114,33 +261,11 @@ _llm_verify_once() {
     fi
     _LLM_VERIFIED_THIS_SESSION=1
 
-    if [ "${DISTRO_ID:-}" = "macos" ] && command -v curl &>/dev/null \
-        && [ -f "$SHARED_DIR/verify-llm-curl.sh" ]; then
-        echo "[*] Verifying API connection..."
-        if bash "$SHARED_DIR/verify-llm-curl.sh" \
-            --provider "$LLM_PROVIDER" \
-            --api-key "$LLM_API_KEY" \
-            --base-url "$LLM_BASE_URL" \
-            --model "$LLM_MODEL"; then
-            echo "[OK] Connection verified!"
-        else
-            echo "WARNING: Could not verify connection. Saving config anyway."
-        fi
-        return 0
-    fi
-
-    local python_cmd="${PYTHON_CMD:-python3}"
-    if command -v "$python_cmd" &>/dev/null && [ -f "$SHARED_DIR/verify-llm.py" ]; then
-        echo "[*] Verifying API connection..."
-        if "$python_cmd" "$SHARED_DIR/verify-llm.py" \
-            --provider "$LLM_PROVIDER" \
-            --api-key "$LLM_API_KEY" \
-            --base-url "$LLM_BASE_URL" \
-            --model "$LLM_MODEL"; then
-            echo "[OK] Connection verified!"
-        else
-            echo "WARNING: Could not verify connection. Saving config anyway."
-        fi
+    echo "[*] Verifying API connection..."
+    if _llm_run_verify; then
+        echo "[OK] Connection verified!"
+    else
+        echo "WARNING: Could not verify connection. Saving config anyway."
     fi
 }
 

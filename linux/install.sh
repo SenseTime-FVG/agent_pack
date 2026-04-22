@@ -19,6 +19,15 @@ fi
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$INSTALLER_DIR/lib"
 AGENT_PACK_CLONE_ROOT=""
+AGENT_PACK_TEMP_ROOT=""
+
+_ap_cleanup() {
+    if [ -n "$AGENT_PACK_TEMP_ROOT" ] && [ -d "$AGENT_PACK_TEMP_ROOT" ]; then
+        rm -rf "$AGENT_PACK_TEMP_ROOT"
+    fi
+}
+
+trap _ap_cleanup EXIT
 
 # If running via curl | bash, download the full package first.
 # This bootstrap can't read config/defaults.json yet (we haven't fetched it),
@@ -28,6 +37,7 @@ AGENT_PACK_REPO="https://github.com/SenseTime-FVG/agent_pack.git"
 if [ ! -d "$LIB_DIR" ]; then
     echo "[*] Downloading Agent Pack installer..."
     TMPDIR=$(mktemp -d)
+    AGENT_PACK_TEMP_ROOT="$TMPDIR"
     _cloned=0
     _bootstrap_try() {
         git clone -q --depth 1 "$1" "$TMPDIR/agent-pack" 2>/dev/null
@@ -87,7 +97,8 @@ fi
 # install_openclaw can share the same source tree.  Runs after CN detection
 # so prefetch itself honors mirrors.
 if [ -z "$AGENT_PACK_CLONE_ROOT" ]; then
-    AGENT_PACK_CLONE_ROOT="$(mktemp -d)/agent_pack"
+    AGENT_PACK_TEMP_ROOT="$(mktemp -d)"
+    AGENT_PACK_CLONE_ROOT="$AGENT_PACK_TEMP_ROOT/agent_pack"
     echo "[*] Pre-fetching agent_pack (shared across product installs)..."
     if ! bash "$_AP_SHARED_DIR/prefetch-agent-pack.sh" "$AGENT_PACK_CLONE_ROOT"; then
         echo "[!] Failed to pre-fetch agent_pack." >&2
@@ -106,24 +117,26 @@ echo ""
 # Ask up front (mirrors the Windows installer wizard) so the user is done
 # with interactive prompts before the long-running installs start.
 collect_llm_config
+verify_llm_config_interactive || exit 1
 
 # ---- Step 2: Product Selection ----
-echo ""
-echo "Which products would you like to install?"
-echo "  1) Hermes Agent"
-echo "  2) OpenClaw"
-echo "  3) Both"
-echo ""
-read -rp "Choice [1]: " product_choice
-product_choice="${product_choice:-1}"
-
 SELECTED_PRODUCTS=()
-case "$product_choice" in
-    1) SELECTED_PRODUCTS=("hermes") ;;
-    2) SELECTED_PRODUCTS=("openclaw") ;;
-    3) SELECTED_PRODUCTS=("hermes" "openclaw") ;;
-    *) echo "Invalid choice. Defaulting to Hermes Agent."; SELECTED_PRODUCTS=("hermes") ;;
-esac
+while true; do
+    echo ""
+    echo "Which products would you like to install?"
+    echo "  1) Hermes Agent"
+    echo "  2) OpenClaw"
+    echo "  3) Both"
+    echo ""
+    read -rp "Choice [1/2/3]: " product_choice
+
+    case "$product_choice" in
+        1) SELECTED_PRODUCTS=("hermes") ; break ;;
+        2) SELECTED_PRODUCTS=("openclaw") ; break ;;
+        3) SELECTED_PRODUCTS=("hermes" "openclaw") ; break ;;
+        *) echo "Please choose 1, 2, or 3." ;;
+    esac
+done
 
 echo ""
 echo "Selected: ${SELECTED_PRODUCTS[*]}"
@@ -185,31 +198,89 @@ _ap_augment_path() {
     export PATH
 }
 
+_ap_resolve_cli() {
+    local name="$1"
+    local candidate=""
+
+    hash -r 2>/dev/null || true
+    candidate="$(command -v "$name" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    case "$name" in
+        hermes)
+            for candidate in \
+                "$HOME/.local/bin/hermes" \
+                "$HOME/.hermes/node/bin/hermes" \
+                "$HERMES_INSTALL_DIR/node/bin/hermes" \
+                "/usr/local/bin/hermes" \
+                "/usr/bin/hermes"; do
+                if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                fi
+            done
+            ;;
+        openclaw)
+            for candidate in \
+                "$HOME/.local/bin/openclaw" \
+                "/usr/local/bin/openclaw" \
+                "/usr/bin/openclaw"; do
+                if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                fi
+            done
+            ;;
+    esac
+
+    return 1
+}
+
 _ap_schedule_dashboard() {
+    local openclaw_cli="$1"
     # Give the gateway a few seconds to bind before opening the browser
     # (dashboard itself doesn't probe, so we sleep for the user's sake).
-    ( sleep 3 && openclaw dashboard >/dev/null 2>&1 ) &
+    ( sleep 3 && "$openclaw_cli" dashboard >/dev/null 2>&1 ) &
     disown 2>/dev/null || true
 }
 
 _ap_augment_path
 
+_HERMES_CLI="$(_ap_resolve_cli hermes || true)"
+_OPENCLAW_CLI="$(_ap_resolve_cli openclaw || true)"
+
+if _ap_has hermes && [ -z "$_HERMES_CLI" ]; then
+    echo "[!] Hermes was installed but the hermes CLI could not be found." >&2
+    exit 1
+fi
+
+if _ap_has openclaw && [ -z "$_OPENCLAW_CLI" ]; then
+    echo "[!] OpenClaw was installed but the openclaw CLI could not be found." >&2
+    exit 1
+fi
+
+trap - EXIT
+_ap_cleanup
+
 if _ap_has openclaw && _ap_has hermes; then
     _openclaw_log="$HOME/.openclaw/gateway.log"
     mkdir -p "$(dirname "$_openclaw_log")"
     echo "[*] Starting openclaw gateway in the background (log: $_openclaw_log)..."
-    nohup openclaw gateway --verbose >"$_openclaw_log" 2>&1 &
+    nohup "$_OPENCLAW_CLI" gateway --verbose >"$_openclaw_log" 2>&1 &
     disown 2>/dev/null || true
-    _ap_schedule_dashboard
+    _ap_schedule_dashboard "$_OPENCLAW_CLI"
     echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     echo "[*] Starting hermes in this window..."
-    exec hermes
+    exec "$_HERMES_CLI"
 elif _ap_has hermes; then
     echo "[*] Starting hermes in this window..."
-    exec hermes
+    exec "$_HERMES_CLI"
 elif _ap_has openclaw; then
-    _ap_schedule_dashboard
+    _ap_schedule_dashboard "$_OPENCLAW_CLI"
     echo "[*] Opening OpenClaw dashboard in your browser shortly..."
     echo "[*] Starting openclaw gateway in this window..."
-    exec openclaw gateway --verbose
+    exec "$_OPENCLAW_CLI" gateway --verbose
 fi
