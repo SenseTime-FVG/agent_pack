@@ -46,7 +46,7 @@ _llm_fill_defaults() {
 
 prepare_llm_config_noninteractive() {
     if [ -z "$LLM_PROVIDER$LLM_BASE_URL$LLM_MODEL$LLM_API_KEY" ]; then
-        echo "[*] Non-interactive mode: no LLM config supplied; product config will be skipped."
+        echo "[*] Preset LLM config: none supplied; product config will be skipped."
         return 0
     fi
 
@@ -70,11 +70,11 @@ prepare_llm_config_noninteractive() {
     fi
 
     if [ -z "$LLM_API_KEY" ]; then
-        echo "[*] Non-interactive mode: no API key supplied; product config will be skipped."
+        echo "[*] Preset LLM config: no API key supplied; product config will be skipped."
         return 0
     fi
 
-    echo "[*] Using non-interactive LLM config: provider=$LLM_PROVIDER model=$LLM_MODEL"
+    echo "[*] Using preset LLM config: provider=$LLM_PROVIDER model=$LLM_MODEL"
 }
 
 # Exported by collect_llm_config, consumed by apply_llm_config.
