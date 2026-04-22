@@ -67,6 +67,19 @@ var
   ProviderModels: array[0..3] of String;
   ProviderBaseUrls: array[0..3] of String;
   ActiveProviderIndex: Integer;
+  // Set by AbortInstall before raising Abort.  Inno Setup can't cancel the
+  // install once ssPostInstall runs (files are already copied), so the only
+  // way to avoid a misleading "Setup completed successfully" finish page is
+  // to rewrite its labels in CurPageChanged(wpFinished) when this flag is set.
+  InstallFailed: Boolean;
+
+// Set the failure flag THEN raise Inno Setup's Abort.  Always call this
+// instead of Abort directly so the finish page reflects the failure.
+procedure AbortInstall;
+begin
+  InstallFailed := True;
+  Abort;
+end;
 
 function MaxValueInt(const A, B: Integer): Integer;
 begin
@@ -500,7 +513,7 @@ begin
       + 'Click Retry to try again, Cancel to abort installation.';
     Response := MsgBox(Prompt, mbError, MB_RETRYCANCEL);
     if Response = IDCANCEL then begin
-      Abort;
+      AbortInstall;
     end;
     // IDRETRY: loop and try again
   end;
@@ -539,7 +552,7 @@ begin
       + 'Click Retry to re-run the installer script, Cancel to abort installation.';
     Response := MsgBox(FullMsg, mbError, MB_RETRYCANCEL);
     if Response = IDCANCEL then begin
-      Abort;
+      AbortInstall;
     end;
     // IDRETRY: loop re-invokes powershell.exe with the same -File script,
     // giving the user a fresh attempt (e.g. after they fix WSL2 / networking).
@@ -646,7 +659,7 @@ begin
       Response := MsgBox(FailMsg + #13#10 + 'Log: ' + FailLog + #13#10#13#10 +
         'Click Retry to re-run the installer script, Cancel to abort.',
         mbError, MB_RETRYCANCEL);
-      if Response = IDCANCEL then Abort;
+      if Response = IDCANCEL then AbortInstall;
       Exit; // caller retries
     end;
     if WantOpenClaw and FileExists(OpenClawFail) then begin
@@ -659,7 +672,7 @@ begin
       Response := MsgBox(FailMsg + #13#10 + 'Log: ' + FailLog + #13#10#13#10 +
         'Click Retry to re-run the installer script, Cancel to abort.',
         mbError, MB_RETRYCANCEL);
-      if Response = IDCANCEL then Abort;
+      if Response = IDCANCEL then AbortInstall;
       Exit;
     end;
 
@@ -681,7 +694,7 @@ begin
     'The install windows may still be working.  Click Retry to keep waiting,' +
     ' or Cancel to abort.',
     mbError, MB_RETRYCANCEL);
-  if Response = IDCANCEL then Abort;
+  if Response = IDCANCEL then AbortInstall;
   // Retry just re-enters the while loop by returning False to caller.
 end;
 
@@ -788,6 +801,24 @@ begin
         ExpandConstant('{group}\OpenClaw.lnk'),
         OpenClawCmd, OpenClawParams, UserHome, 'OpenClaw Gateway');
     end;
+  end;
+end;
+
+// Rewrite the finish page labels when AbortInstall fired during ssPostInstall.
+// Inno Setup always shows wpFinished after the install step completes —
+// including when Abort was raised — and defaults to the cheerful
+// "Setup was completed successfully" wording, which is misleading if the
+// post-install scripts bailed.  Detect the flag and surface the failure.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and InstallFailed then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Setup did not complete';
+    WizardForm.FinishedLabel.Caption :=
+      'Agent Pack installation was aborted because a post-install step failed ' +
+      'or was cancelled.  Files may have been copied to the install directory, ' +
+      'but one or more agents were not fully configured.' + #13#10#13#10 +
+      'Check the install logs under %LOCALAPPDATA%\AgentPack\logs for details, ' +
+      'then re-run the installer once the underlying issue is fixed.';
   end;
 end;
 
