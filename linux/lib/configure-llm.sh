@@ -329,6 +329,15 @@ PY
                 *)         api_dialect="openai-completions" ;;
             esac
 
+            # ModelDefinitionConfig has several required fields (reasoning,
+            # input, cost, contextWindow, maxTokens) that earlier installs
+            # omitted — openclaw's zod schema rejected the write silently for
+            # custom providers, leaving the provider registered but empty and
+            # forcing `agents.defaults.model` to fall back to the bundled
+            # catalog (which is why users who picked e.g. a Sensenova model
+            # saw it vanish from the UI and gateway pick a different agent).
+            # Give sensible conservative defaults so the write succeeds; the
+            # user can still tweak them later with `openclaw config set`.
             local provider_json
             provider_json="$(
                 BASE_URL="$base_url" API_KEY="$api_key" MODEL="$model" API="$api_dialect" \
@@ -337,15 +346,27 @@ import json, os
 print(json.dumps({
     "baseUrl": os.environ["BASE_URL"],
     "apiKey": os.environ["API_KEY"],
+    "api": os.environ["API"],
     "models": [{
         "id": os.environ["MODEL"],
         "name": os.environ["MODEL"],
         "api": os.environ["API"],
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 128000,
+        "maxTokens": 8192,
     }],
 }))
 ')"
-            openclaw config set "models.providers.${provider_prefix}" \
-                "$provider_json" --strict-json
+            # Keep stderr visible — a silent rejection here is exactly what
+            # caused the Sensenova / custom-provider regression we just fixed.
+            if ! openclaw config set "models.providers.${provider_prefix}" \
+                    "$provider_json" --strict-json; then
+                echo "[!] ERROR: 'openclaw config set models.providers.${provider_prefix}' failed."
+                echo "    Config not written; see error above." >&2
+                return 1
+            fi
             echo "[OK] OpenClaw provider registered: ${provider_prefix} -> ${model} (${api_dialect})"
 
             # Use `openclaw models set` rather than `config set agents.defaults.model`:
@@ -357,10 +378,16 @@ print(json.dumps({
             # Without this, the UI's chat-model dropdown silently falls back
             # to a bundled default (e.g. openai/gpt-4o-mini) because the raw
             # "provider/model" string isn't in the allowlist.
-            if ! openclaw models set "${provider_prefix}/${model}" >/dev/null 2>&1; then
-                # Fallback: some older openclaw builds don't have `models set`
-                # yet.  `config set agents.defaults.model` at least keeps the
-                # primary correct even though allowlist won't get the entry.
+            #
+            # We intentionally DO NOT redirect stderr to /dev/null — a silent
+            # rejection here previously let an earlier "default model" setting
+            # stick even though the user had just picked a new one.
+            if ! openclaw models set "${provider_prefix}/${model}"; then
+                echo "[!] 'openclaw models set' failed — falling back to 'config set agents.defaults.model'."
+                echo "    The allowlist (agents.defaults.models[<key>]) will NOT contain the entry," >&2
+                echo "    so the control UI may still show a different default." >&2
+                # Fallback: older openclaw builds, or models that fail the
+                # alias-index resolve.  At least the primary field gets set.
                 openclaw config set agents.defaults.model "${provider_prefix}/${model}"
                 echo "[OK] OpenClaw default model set (via 'config set' fallback)"
             else
