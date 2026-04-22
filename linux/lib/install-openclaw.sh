@@ -124,12 +124,56 @@ install_openclaw() {
             case ":$retry_path:" in *":$extra:"*) ;; *) retry_path="$extra:$retry_path" ;; esac
         done
 
+        # If pnpm still isn't reachable, install it ourselves.  Upstream
+        # `ensure_pnpm` did this via `npm install -g pnpm@10`, but a silent
+        # failure during that path is what got us here — redo it and then
+        # re-probe the usual install locations.  Without this the user sees
+        # "pnpm: command not found" and has to finish the build manually.
         if ! PATH="$retry_path" command -v pnpm >/dev/null 2>&1; then
-            echo "[!] ERROR: pnpm not on PATH after install — ui:build cannot retry." >&2
-            echo "    Searched: $retry_path" >&2
-            echo "    Finish the install manually:" >&2
-            echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
-            return 1
+            echo "[*] pnpm not found on PATH — installing pnpm@10 via npm..."
+            if ! command -v npm >/dev/null 2>&1; then
+                echo "[!] ERROR: npm not available either — can't install pnpm." >&2
+                echo "    Finish the install manually:" >&2
+                echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
+                return 1
+            fi
+            if ! PATH="$retry_path" npm install -g pnpm@10; then
+                echo "[!] ERROR: 'npm install -g pnpm@10' failed." >&2
+                echo "    Finish the install manually:" >&2
+                echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
+                return 1
+            fi
+            hash -r 2>/dev/null || true
+            # npm may have reshuffled its prefix after the global install
+            # (e.g. if the user's npm config didn't have one before).  Pick
+            # up the fresh value and append it to our search path.
+            npm_prefix_now="$(PATH="$retry_path" npm config get prefix 2>/dev/null || true)"
+            if [ -n "$npm_prefix_now" ] && [ -d "$npm_prefix_now/bin" ]; then
+                case ":$retry_path:" in
+                    *":$npm_prefix_now/bin:"*) ;;
+                    *) retry_path="$npm_prefix_now/bin:$retry_path" ;;
+                esac
+            fi
+            if ! PATH="$retry_path" command -v pnpm >/dev/null 2>&1; then
+                echo "[!] ERROR: pnpm still not on PATH after install (searched: $retry_path)." >&2
+                echo "    Finish the install manually:" >&2
+                echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
+                return 1
+            fi
+            echo "[OK] pnpm installed: $(PATH="$retry_path" command -v pnpm)"
+        fi
+
+        # pnpm ui:build runs through scripts/ui.js (see
+        # repos/openclaw/scripts/ui.js).  That helper does `pnpm install`
+        # against repos/openclaw/ui first, then `pnpm build`.  If deps were
+        # never installed under the vendored tree, do a one-shot install at
+        # the repo root first so the retry doesn't trip on missing modules.
+        if [ ! -d "$OPENCLAW_INSTALL_DIR/node_modules" ]; then
+            echo "[*] Installing OpenClaw npm dependencies (pnpm install)..."
+            if ! ( cd "$OPENCLAW_INSTALL_DIR" && PATH="$retry_path" pnpm install ); then
+                echo "[!] ERROR: 'pnpm install' at $OPENCLAW_INSTALL_DIR failed." >&2
+                return 1
+            fi
         fi
 
         if ! ( cd "$OPENCLAW_INSTALL_DIR" && PATH="$retry_path" pnpm ui:build ); then
