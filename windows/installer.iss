@@ -253,9 +253,8 @@ begin
   UpdateProviderFieldLayout;
 end;
 
-// Build the shared verify-llm.py invocation suffix (args after the script path).
-// Returns a string starting with " --provider ..." so it can be appended to
-// either a Windows python command or a WSL bash command.
+// Build the shared verify-llm.py invocation suffix (args after the script
+// path). Used by the WSL fallback verifier.
 function BuildVerifyArgs(const Provider: String): String;
 var
   Args: String;
@@ -271,9 +270,165 @@ begin
   Result := Args;
 end;
 
-// Read up to MaxBytes of LogPath; return a trimmed string.  Used to grab the
-// stdout+stderr of the verify step so we can show the user the actual error
-// (Python not found, 401, unknown model, ...) instead of a blanket "failed".
+function StripTrailingSlash(const S: String): String;
+begin
+  Result := S;
+  while (Result <> '') and (Result[Length(Result)] = '/') do begin
+    Delete(Result, Length(Result), 1);
+  end;
+end;
+
+function JsonEscape(const S: String): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(S) do begin
+    if S[i] = '\' then begin
+      Result := Result + '\\';
+    end else if S[i] = '"' then begin
+      Result := Result + '\"';
+    end else if S[i] = #8 then begin
+      Result := Result + '\b';
+    end else if S[i] = #9 then begin
+      Result := Result + '\t';
+    end else if S[i] = #10 then begin
+      Result := Result + '\n';
+    end else if S[i] = #12 then begin
+      Result := Result + '\f';
+    end else if S[i] = #13 then begin
+      Result := Result + '\r';
+    end else begin
+      Result := Result + S[i];
+    end;
+  end;
+end;
+
+function LoadTextFile(const Path: String): String;
+var
+  Lines: TArrayOfString;
+  i: Integer;
+begin
+  Result := '';
+  if not FileExists(Path) then begin
+    Exit;
+  end;
+  if not LoadStringsFromFile(Path, Lines) then begin
+    Exit;
+  end;
+  for i := 0 to GetArrayLength(Lines) - 1 do begin
+    if i > 0 then begin
+      Result := Result + #13#10;
+    end;
+    Result := Result + Lines[i];
+  end;
+end;
+
+procedure AppendLogSection(const LogPath, Title, SourcePath: String);
+var
+  Body: String;
+begin
+  Body := Trim(LoadTextFile(SourcePath));
+  if Body = '' then begin
+    Exit;
+  end;
+  SaveStringToFile(
+    LogPath,
+    '' + #13#10 + '--- ' + Title + ' ---' + #13#10 + Body + #13#10,
+    True
+  );
+end;
+
+function ReadLastHttpStatusCode(const HeadersPath: String): Integer;
+var
+  Lines: TArrayOfString;
+  i, SpacePos: Integer;
+  Line, Rest, CodeText: String;
+begin
+  Result := 0;
+  if not FileExists(HeadersPath) then begin
+    Exit;
+  end;
+  if not LoadStringsFromFile(HeadersPath, Lines) then begin
+    Exit;
+  end;
+  for i := 0 to GetArrayLength(Lines) - 1 do begin
+    Line := Trim(Lines[i]);
+    if Copy(Line, 1, 5) = 'HTTP/' then begin
+      SpacePos := Pos(' ', Line);
+      if SpacePos > 0 then begin
+        Rest := Trim(Copy(Line, SpacePos + 1, MaxInt));
+        CodeText := Copy(Rest, 1, 3);
+        Result := StrToIntDef(CodeText, 0);
+      end;
+    end;
+  end;
+end;
+
+function BodyLooksSuccessful(const Provider, BodyPath: String): Boolean;
+var
+  Body: String;
+begin
+  Body := LoadTextFile(BodyPath);
+  if Provider = 'anthropic' then begin
+    Result := Pos('"content"', Body) > 0;
+  end else begin
+    Result := Pos('"choices"', Body) > 0;
+  end;
+end;
+
+function BuildVerifyPayload(const Provider, Model: String): String;
+begin
+  if Provider = 'anthropic' then begin
+    Result := '{"model":"' + JsonEscape(Model)
+      + '","max_tokens":5,"messages":[{"role":"user","content":"Say OK"}]}';
+  end else begin
+    Result := '{"model":"' + JsonEscape(Model)
+      + '","messages":[{"role":"user","content":"Say OK"}],"max_tokens":5}';
+  end;
+end;
+
+function BuildVerifyUrl(const Provider: String): String;
+var
+  BaseUrl: String;
+begin
+  BaseUrl := Trim(BaseUrlEdit.Text);
+  if BaseUrl = '' then begin
+    BaseUrl := GetDefaultBaseUrl(GetSelectedProviderIndex);
+  end;
+  BaseUrl := StripTrailingSlash(BaseUrl);
+  if Provider = 'anthropic' then begin
+    Result := BaseUrl + '/v1/messages';
+  end else begin
+    Result := BaseUrl + '/chat/completions';
+  end;
+end;
+
+function BuildCurlVerifyParams(
+  const Provider, PayloadPath, BodyPath, HeadersPath, ErrPath: String
+): String;
+begin
+  Result := '--silent --show-error --request POST --connect-timeout 15 --max-time 30'
+    + ' --url "' + BuildVerifyUrl(Provider) + '"'
+    + ' --header "Content-Type: application/json"';
+  if Provider = 'anthropic' then begin
+    Result := Result
+      + ' --header "x-api-key: ' + ApiKeyEdit.Text + '"'
+      + ' --header "anthropic-version: 2023-06-01"';
+  end else begin
+    Result := Result
+      + ' --header "Authorization: Bearer ' + ApiKeyEdit.Text + '"';
+  end;
+  Result := Result
+    + ' --data-binary "@' + PayloadPath + '"'
+    + ' --dump-header "' + HeadersPath + '"'
+    + ' --output "' + BodyPath + '"'
+    + ' --stderr "' + ErrPath + '"';
+end;
+
+// Read up to MaxBytes of LogPath; return a trimmed string. Used to grab the
+// verify log so we can show the user the actual error instead of a blanket
+// "failed".
 function ReadLogTail(const LogPath: String; MaxBytes: Integer): String;
 var
   Lines: TArrayOfString;
@@ -301,25 +456,68 @@ begin
   Result := Trim(Body);
 end;
 
-// Try to run verify-llm.py through the host's Python.  Captures combined
-// stdout+stderr into LogPath (caller-provided) so we can report the actual
-// error back to the user on failure.  Returns True iff the process launched
-// AND exited 0.  Any other combination (Python not found, API failure, etc.)
-// returns False so the caller can fall through to WSL.
-function TryVerifyViaHostPython(const ScriptPath, Args, LogPath: String): Boolean;
+// Try to verify directly from the Windows host using curl.exe. Captures curl
+// stderr plus any HTTP response headers/body into LogPath. If curl launches and
+// receives an HTTP response, we do not fall back to WSL - the API already told
+// us whether the config is valid. WSL is reserved for cases where curl cannot
+// be launched or cannot reach the endpoint.
+function TryVerifyViaHostCurl(const Provider, LogPath: String;
+  var NeedsWslFallback: Boolean): Boolean;
 var
-  ResultCode: Integer;
-  FullCmd: String;
+  CurlPath, PayloadPath, BodyPath, HeadersPath, ErrPath: String;
+  Payload, Params, Model: String;
+  ResultCode, StatusCode: Integer;
 begin
-  // Prepend a marker line so the user can see which backend the message
-  // came from when the log bubbles up in the error dialog.
-  SaveStringToFile(LogPath, '=== host python ===' + #13#10, False);
-  // `>> ... 2>&1` appends both streams; the marker line above becomes
-  // the first entry of the log for this backend.
-  FullCmd := '/c python "' + ScriptPath + '"' + Args
-    + ' >> "' + LogPath + '" 2>&1';
-  Result := Exec('cmd.exe', FullCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-    and (ResultCode = 0);
+  Result := False;
+  NeedsWslFallback := True;
+  SaveStringToFile(LogPath, '=== host curl.exe ===' + #13#10, False);
+
+  Model := Trim(ModelEdit.Text);
+  if Model = '' then begin
+    Model := GetDefaultModel(GetSelectedProviderIndex);
+  end;
+  Payload := BuildVerifyPayload(Provider, Model);
+
+  PayloadPath := ExpandConstant('{tmp}') + '\agent-pack-verify-payload.json';
+  BodyPath := ExpandConstant('{tmp}') + '\agent-pack-verify-body.json';
+  HeadersPath := ExpandConstant('{tmp}') + '\agent-pack-verify-headers.txt';
+  ErrPath := ExpandConstant('{tmp}') + '\agent-pack-verify-curl.stderr.txt';
+
+  if not SaveStringToFile(PayloadPath, Payload, False) then begin
+    SaveStringToFile(LogPath, 'ERROR: Failed to write curl payload file.' + #13#10, True);
+    Exit;
+  end;
+  SaveStringToFile(BodyPath, '', False);
+  SaveStringToFile(HeadersPath, '', False);
+  SaveStringToFile(ErrPath, '', False);
+
+  CurlPath := ExpandConstant('{sys}\curl.exe');
+  Params := BuildCurlVerifyParams(Provider, PayloadPath, BodyPath, HeadersPath, ErrPath);
+
+  if not Exec(CurlPath, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+    SaveStringToFile(LogPath, 'ERROR: curl.exe could not be launched.' + #13#10, True);
+    Exit;
+  end;
+
+  AppendLogSection(LogPath, 'curl stderr', ErrPath);
+  AppendLogSection(LogPath, 'response headers', HeadersPath);
+  AppendLogSection(LogPath, 'response body', BodyPath);
+
+  StatusCode := ReadLastHttpStatusCode(HeadersPath);
+  if StatusCode <> 0 then begin
+    NeedsWslFallback := False;
+    Result := (StatusCode >= 200) and (StatusCode < 300)
+      and BodyLooksSuccessful(Provider, BodyPath);
+    Exit;
+  end;
+
+  if ResultCode <> 0 then begin
+    SaveStringToFile(
+      LogPath,
+      '' + #13#10 + 'ERROR: curl exit code ' + IntToStr(ResultCode) + #13#10,
+      True
+    );
+  end;
 end;
 
 // Replace each ' in S with '\'' so S can be embedded inside a bash
@@ -368,7 +566,7 @@ end;
 procedure OnVerifyClick(Sender: TObject);
 var
   ScriptPath, Args, Provider, LogPath, LogTail, Dialog: String;
-  Ok: Boolean;
+  Ok, NeedsWslFallback: Boolean;
 begin
   Provider := GetProviderName(GetSelectedProviderIndex);
   ScriptPath := ExpandConstant('{app}') + '\shared\verify-llm.py';
@@ -381,12 +579,12 @@ begin
   VerifyLabel.Caption := 'Verifying...';
   VerifyLabel.Font.Color := clBlue;
 
-  // Try host Python first (fast path: no WSL round-trip).  If that fails for
+  // Try host curl.exe first so Windows users do not need Python installed
   // ANY reason — missing python.exe, network error, bad key, wrong model —
   // fall through to WSL.  That way a teammate without Windows Python still
-  // gets a real verification against the API rather than a false "failed".
-  Ok := TryVerifyViaHostPython(ScriptPath, Args, LogPath);
-  if not Ok then begin
+  // cannot run or cannot reach the endpoint.
+  Ok := TryVerifyViaHostCurl(Provider, LogPath, NeedsWslFallback);
+  if (not Ok) and NeedsWslFallback then begin
     Ok := TryVerifyViaWsl(ScriptPath, Args, LogPath);
   end;
 

@@ -67,6 +67,40 @@ install_openclaw() {
         child_path="$npm_prefix/bin:$child_path"
     fi
 
+    # Pre-activate pnpm via corepack so upstream's detect_pnpm_cmd hits
+    # `command -v pnpm` on its first check, takes the `set_pnpm_cmd pnpm`
+    # branch, and skips the corepack-wrapper fallback in
+    # ensure_pnpm_binary_for_scripts (which emits the confusing
+    # "pnpm shim not on PATH; installed user-local wrapper at ..." warning
+    # users keep asking about).  Activation drops a pnpm shim next to the
+    # corepack binary — usually $npm_prefix/bin/pnpm, which is already on
+    # $child_path from the block above.  We also drop a ~/.local/bin/pnpm
+    # symlink as belt-and-suspenders, since some corepack versions put the
+    # shim in a cache dir that isn't on PATH.
+    if PATH="$child_path" command -v corepack >/dev/null 2>&1 \
+        && ! PATH="$child_path" command -v pnpm >/dev/null 2>&1; then
+        echo "[*] Pre-activating pnpm via corepack (avoids upstream wrapper warning)..."
+        PATH="$child_path" corepack enable >/dev/null 2>&1 || true
+        PATH="$child_path" corepack prepare pnpm@10 --activate >/dev/null 2>&1 || true
+        # Add the dir holding the freshly-created pnpm shim (if any) to
+        # $child_path so subsequent lookups find it.
+        local pnpm_bin
+        pnpm_bin="$(PATH="$child_path" command -v pnpm 2>/dev/null || true)"
+        if [ -n "$pnpm_bin" ]; then
+            local pnpm_dir
+            pnpm_dir="$(dirname "$pnpm_bin")"
+            case ":$child_path:" in
+                *":$pnpm_dir:"*) ;;
+                *) child_path="$pnpm_dir:$child_path" ;;
+            esac
+            # Also stash a symlink in ~/.local/bin for good measure — the
+            # user's future shells usually have ~/.local/bin on PATH even
+            # if hermes's node bin isn't sourced.
+            mkdir -p "$HOME/.local/bin"
+            ln -sf "$pnpm_bin" "$HOME/.local/bin/pnpm" 2>/dev/null || true
+        fi
+    fi
+
     # AGENTPACK_VERBOSE=1 propagates to upstream install.sh as OPENCLAW_VERBOSE,
     # which unfolds every run_quiet_step (default behavior hides stdout/stderr
     # unless the step fails, and even then only tail -n 80 is emitted — which

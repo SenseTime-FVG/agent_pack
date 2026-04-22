@@ -88,9 +88,9 @@ Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/opencl
 
 | 平台 | 下载 | 使用方式 |
 |------|------|---------|
-| Windows | [`AgentPack-1.0.6-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-windows-x64.exe) | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
-| macOS | [`AgentPack-1.0.6-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-macos-universal.pkg) | 双击后按图形向导完成产品选择和 LLM 配置；安装完成后会按所选产品自动打开 OpenClaw Gateway Terminal 与 dashboard，并打开 Hermes Terminal |
-| Linux | [`AgentPack-1.0.6-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-linux.sh) 或下面的一行命令 | 下载后 `chmod +x AgentPack-1.0.6-linux.sh && ./AgentPack-1.0.6-linux.sh`，或直接粘贴 `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — 两种方式都会在安装结束后用 `exec` 在当前 shell 里拉起 agent |
+| Windows | [去最新 release 下载 `-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest) | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
+| macOS | [去最新 release 下载 `-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest) | 双击后按图形向导完成产品选择和 LLM 配置；安装完成后会按所选产品自动打开 OpenClaw Gateway Terminal 与 dashboard，并打开 Hermes Terminal |
+| Linux | [去最新 release 下载 `-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest) 或下面的一行命令 | 下载后 `chmod +x AgentPack-*-linux.sh && ./AgentPack-*-linux.sh`，或直接粘贴 `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — 两种方式都会在安装结束后用 `exec` 在当前 shell 里拉起 agent |
 
 ## 从源码构建
 
@@ -103,7 +103,7 @@ cd windows
 iscc installer.iss
 ```
 
-产物：`dist/AgentPack-1.0.6-windows-x64.exe`
+产物：`dist/AgentPack-<ver>-windows-x64.exe`
 
 ### macOS (.pkg)
 
@@ -114,7 +114,7 @@ cd macos
 ./build-pkg.sh
 ```
 
-产物：`dist/AgentPack-1.0.6-macos-universal.pkg`
+产物：`dist/AgentPack-<ver>-macos-universal.pkg`
 
 ### Linux
 
