@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$SCRIPT_DIR/build"
 DIST_DIR="$PROJECT_ROOT/dist"
-VERSION="1.0.3"
+VERSION="1.0.4"
 SCRIPTS_DIR="$BUILD_DIR/scripts"
 
 rm -rf "$BUILD_DIR"

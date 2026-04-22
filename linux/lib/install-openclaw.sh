@@ -98,7 +98,41 @@ install_openclaw() {
     local ui_dist="$OPENCLAW_INSTALL_DIR/dist/control-ui"
     if [ ! -f "$ui_dist/index.html" ]; then
         echo "[!] Control UI assets missing at $ui_dist — retrying ui:build with full output..."
-        if ! ( cd "$OPENCLAW_INSTALL_DIR" && PATH="$child_path" pnpm ui:build ); then
+
+        # Re-locate pnpm from scratch.  $child_path above was computed
+        # BEFORE install.sh ran and so doesn't see dirs npm/corepack
+        # created during the install (e.g. $npm_prefix/bin, corepack's
+        # ~/.local/share/pnpm, etc).  Use `hash -r` to clear bash's
+        # negative lookup cache, then fall through a list of well-known
+        # install locations.  Mirrors the same belt-and-suspenders
+        # approach used for the openclaw binary search below.
+        hash -r 2>/dev/null || true
+        local retry_path="$child_path"
+        # Refresh npm prefix in case the install shuffled it.
+        local npm_prefix_now=""
+        if command -v npm >/dev/null 2>&1; then
+            npm_prefix_now="$(PATH="$retry_path" npm config get prefix 2>/dev/null || true)"
+        fi
+        local extra
+        for extra in \
+            "${npm_prefix_now:+$npm_prefix_now/bin}" \
+            "$HOME/.local/share/pnpm" \
+            "$HOME/.local/bin" \
+            "/usr/local/bin" \
+            "/usr/bin"; do
+            [ -z "$extra" ] && continue
+            case ":$retry_path:" in *":$extra:"*) ;; *) retry_path="$extra:$retry_path" ;; esac
+        done
+
+        if ! PATH="$retry_path" command -v pnpm >/dev/null 2>&1; then
+            echo "[!] ERROR: pnpm not on PATH after install — ui:build cannot retry." >&2
+            echo "    Searched: $retry_path" >&2
+            echo "    Finish the install manually:" >&2
+            echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
+            return 1
+        fi
+
+        if ! ( cd "$OPENCLAW_INSTALL_DIR" && PATH="$retry_path" pnpm ui:build ); then
             echo "[!] ERROR: pnpm ui:build failed. Run with AGENTPACK_VERBOSE=1 to see the dependency install step in full." >&2
             echo "    You can complete the install manually by running:" >&2
             echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
