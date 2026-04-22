@@ -93,4 +93,13 @@ Set-Content -LiteralPath (Join-Path $markerDir "hermes-installed.marker") `
 Write-Host ""
 Write-Host "[OK] Hermes Agent installed. Starting hermes in this window..." -ForegroundColor Green
 Write-Host ""
-& wsl.exe -- bash -lc 'hermes'
+
+# Switch the console codepage to UTF-8 before handing off, so Chinese
+# characters typed into the hermes REPL reach the agent as UTF-8 bytes
+# (not GBK) on zh-CN Windows hosts.
+Set-ConsoleUtf8CodePage
+
+# Force a UTF-8 locale inside WSL for the hermes process.  Some readline-
+# based REPLs misread multibyte input when LANG is unset or C, even with
+# the console codepage already set to 65001 on the Windows side.
+& wsl.exe -- bash -lc 'LANG=C.UTF-8 LC_ALL=C.UTF-8 hermes'

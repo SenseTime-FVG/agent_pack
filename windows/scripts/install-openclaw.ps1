@@ -118,4 +118,12 @@ Write-Host ""
 Write-Host "[OK] OpenClaw installed. Starting gateway in this window..." -ForegroundColor Green
 Write-Host "[*] Opening OpenClaw dashboard in your browser shortly..." -ForegroundColor Cyan
 Write-Host ""
-& wsl.exe -- bash -lc 'openclaw gateway --verbose'
+
+# Switch the console codepage to UTF-8 before handing off, so log output
+# from openclaw (which emits UTF-8) renders correctly and any Chinese
+# typed in future `openclaw` subcommands reaches the gateway as UTF-8.
+Set-ConsoleUtf8CodePage
+
+# Force a UTF-8 locale inside WSL so openclaw's log formatter and any
+# multibyte input forwarded into the gateway read as UTF-8.
+& wsl.exe -- bash -lc 'LANG=C.UTF-8 LC_ALL=C.UTF-8 openclaw gateway --verbose'

@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6.x
 
 #define MyAppName "Agent Pack"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Agent Pack"
 #define MyAppURL "https://github.com/SenseTime-FVG/agent_pack"
 

@@ -14,6 +14,26 @@ try {
     # ignore the failure rather than aborting the install.
 }
 
+# Flip the whole console's codepage to UTF-8 (65001).  Unlike the
+# [Console]::OutputEncoding setter above — which only affects text THIS
+# PowerShell process reads/writes — `chcp 65001` changes the codepage for
+# the console AS A WHOLE, which is what child processes (cmd.exe, wsl.exe,
+# and anything spawned from them) inherit.  Without this, typing Chinese
+# into a `hermes` REPL that we exec via `wsl.exe -- bash -lc 'hermes'`
+# sends GBK bytes, which the agent decodes as UTF-8 and garbles.
+# Call this right before exec'ing the agent so our own Write-Host output
+# (already UTF-8) isn't affected while the installer is still speaking.
+function Set-ConsoleUtf8CodePage {
+    # `chcp` is a cmd.exe builtin — shell out to cmd to avoid PowerShell
+    # complaining that the command isn't a file.  Swallow output: chcp
+    # prints "Active code page: 65001" which is just noise for the user.
+    try {
+        & cmd.exe /c 'chcp 65001 >NUL 2>&1'
+    } catch {
+        # Ignore — at worst the user retains the system default codepage.
+    }
+}
+
 $script:RegionChecked = $false
 $script:IsChinaRegion = $false
 
