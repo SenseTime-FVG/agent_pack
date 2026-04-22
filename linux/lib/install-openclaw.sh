@@ -214,6 +214,19 @@ install_openclaw() {
             echo "[!] Could not set gateway.mode=local automatically."
             echo "    Run: openclaw config set gateway.mode local"
         fi
+        # Export the dir holding openclaw into the caller's PATH so
+        # apply_llm_config_for (which runs in the same shell right after
+        # install_openclaw returns) can find the CLI without redoing this
+        # whole candidate-list dance.  Without this, the caller's bare
+        # `command -v openclaw` misses the binary and we skip the default-
+        # model set step — exactly the "openclaw CLI not on PATH" message
+        # users saw in the install log.
+        local openclaw_dir
+        openclaw_dir="$(dirname "$openclaw_bin")"
+        case ":$PATH:" in
+            *":$openclaw_dir:"*) ;;
+            *) export PATH="$openclaw_dir:$PATH" ;;
+        esac
     else
         echo "[!] openclaw not found on PATH after install — skipping gateway.mode=local."
         echo "    Run: openclaw config set gateway.mode local"

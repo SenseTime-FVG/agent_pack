@@ -89,9 +89,9 @@ Pre-built installers live on the [GitHub Releases page](https://github.com/Sense
 
 | Platform | Download | How to Use |
 |----------|----------|------------|
-| Windows | [`AgentPack-1.0.5-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.5-windows-x64.exe) | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
-| macOS | [`AgentPack-1.0.5-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.5-macos-universal.pkg) | Double-click, then complete setup in the Terminal window that opens; the same window becomes the agent's REPL / gateway once installation finishes |
-| Linux | [`AgentPack-1.0.5-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.5-linux.sh) *or* the one-liner below | Download and run `chmod +x AgentPack-1.0.5-linux.sh && ./AgentPack-1.0.5-linux.sh`, or paste `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — either way the shell that ran the installer is handed over to the agent via `exec` |
+| Windows | [`AgentPack-1.0.6-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-windows-x64.exe) | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
+| macOS | [`AgentPack-1.0.6-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-macos-universal.pkg) | Double-click, then complete setup in the Terminal window that opens; the same window becomes the agent's REPL / gateway once installation finishes |
+| Linux | [`AgentPack-1.0.6-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.6-linux.sh) *or* the one-liner below | Download and run `chmod +x AgentPack-1.0.6-linux.sh && ./AgentPack-1.0.6-linux.sh`, or paste `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — either way the shell that ran the installer is handed over to the agent via `exec` |
 
 ## Building from Source
 
@@ -104,7 +104,7 @@ cd windows
 iscc installer.iss
 ```
 
-Output: `dist/AgentPack-1.0.5-windows-x64.exe`
+Output: `dist/AgentPack-1.0.6-windows-x64.exe`
 
 ### macOS (.pkg)
 
@@ -115,7 +115,7 @@ cd macos
 ./build-pkg.sh
 ```
 
-Output: `dist/AgentPack-1.0.5-macos-universal.pkg`
+Output: `dist/AgentPack-1.0.6-macos-universal.pkg`
 
 ### Linux
 

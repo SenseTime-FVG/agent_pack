@@ -101,6 +101,16 @@ try {
         }
     }
     if ($url) {
+        # Pin the opening session to "main" so the user lands on the default
+        # chat session rather than whichever background session (heartbeat,
+        # etc.) is currently active.  The URL openclaw reports already
+        # contains #token=...; UI's app-settings.ts reads `session` from
+        # either searchParams or hashParams, so we append with `&`.
+        if ($url -match '#') {
+            $url = "$url&session=main"
+        } else {
+            $url = "$url#session=main"
+        }
         Start-Process $url
     }
 } catch { }
