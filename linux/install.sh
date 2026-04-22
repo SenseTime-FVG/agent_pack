@@ -6,6 +6,16 @@ set -euo pipefail
 #  Linux Edition
 # ========================================
 
+# When invoked as `curl ... | bash`, bash's stdin is the pipe carrying the
+# script body, so every `read -rp` inside hits EOF and silently accepts
+# defaults — the user sees no prompts and ends up with Hermes installed and
+# no LLM config written.  Rebind stdin to the controlling tty so prompts
+# work in that flow.  No-op when stdin is already a tty (plain `bash
+# install.sh`) or when there's no tty to fall back to (CI, containers).
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+    exec </dev/tty
+fi
+
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$INSTALLER_DIR/lib"
 AGENT_PACK_CLONE_ROOT=""
