@@ -240,38 +240,104 @@ begin
   UpdateProviderFieldLayout;
 end;
 
-procedure OnVerifyClick(Sender: TObject);
+// Build the shared verify-llm.py invocation suffix (args after the script path).
+// Returns a string starting with " --provider ..." so it can be appended to
+// either a Windows python command or a WSL bash command.
+function BuildVerifyArgs(const Provider: String): String;
+var
+  Args: String;
+begin
+  Args := ' --provider ' + Provider
+    + ' --api-key "' + ApiKeyEdit.Text + '"';
+  if Trim(ModelEdit.Text) <> '' then begin
+    Args := Args + ' --model "' + ModelEdit.Text + '"';
+  end;
+  if Provider = 'custom' then begin
+    Args := Args + ' --base-url "' + BaseUrlEdit.Text + '"';
+  end;
+  Result := Args;
+end;
+
+// Try to run verify-llm.py through the host's Python.  Returns True iff the
+// process launched AND exited 0.  Any other combination (Python not found,
+// API failure, etc.) returns False so the caller can fall through to WSL.
+function TryVerifyViaHostPython(const ScriptPath, Args: String): Boolean;
 var
   ResultCode: Integer;
-  Provider, Cmd: String;
+  FullCmd: String;
+begin
+  FullCmd := '/c python "' + ScriptPath + '"' + Args;
+  Result := Exec('cmd.exe', FullCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
+// Replace each ' in S with '\'' so S can be embedded inside a bash
+// single-quoted literal.  Inno Setup's Pascal doesn't have
+// StringReplace(..., [rfReplaceAll]) exposed, so do it manually.
+function BashSingleQuoteEscape(const S: String): String;
+var
+  i: Integer;
+  Buf: String;
+begin
+  Buf := '';
+  for i := 1 to Length(S) do begin
+    if S[i] = '''' then begin
+      Buf := Buf + '''\''''';
+    end else begin
+      Buf := Buf + S[i];
+    end;
+  end;
+  Result := Buf;
+end;
+
+// Fallback: run verify-llm.py through WSL's python3.  Every Windows install
+// target already has WSL2 + a distro set up (Agent Pack requires it), so
+// python3 is reliably available there even when the user hasn't installed
+// Python on the Windows host.  Returns True iff wsl.exe ran AND exited 0.
+function TryVerifyViaWsl(const ScriptPath, Args: String): Boolean;
+var
+  ResultCode: Integer;
+  WslPath, BashCmd, Cmd: String;
+begin
+  // wslpath -a converts C:\foo\bar.py → /mnt/c/foo/bar.py; easier to shell
+  // the conversion out than to translate path separators ourselves.
+  // We wrap the full bash program in single quotes and escape any ' inside
+  // the user-supplied args (e.g. an API key containing ') so it can't
+  // prematurely terminate the quoting.
+  WslPath := ExpandConstant('{app}') + '\shared\verify-llm.py';
+  BashCmd := 'python3 "$(wslpath -a "' + WslPath + '")"'
+    + BashSingleQuoteEscape(Args);
+  Cmd := '/c wsl.exe -- bash -lc ''' + BashCmd + '''';
+  Result := Exec('cmd.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
+procedure OnVerifyClick(Sender: TObject);
+var
+  ScriptPath, Args, Provider: String;
+  Ok: Boolean;
 begin
   Provider := GetProviderName(GetSelectedProviderIndex);
-
-  Cmd := 'python "' + ExpandConstant('{app}') + '\shared\verify-llm.py"'
-    + ' --provider ' + Provider
-    + ' --api-key "' + ApiKeyEdit.Text + '"';
-
-  if Trim(ModelEdit.Text) <> '' then begin
-    Cmd := Cmd + ' --model "' + ModelEdit.Text + '"';
-  end;
-
-  if Provider = 'custom' then begin
-    Cmd := Cmd + ' --base-url "' + BaseUrlEdit.Text + '"';
-  end;
+  ScriptPath := ExpandConstant('{app}') + '\shared\verify-llm.py';
+  Args := BuildVerifyArgs(Provider);
 
   VerifyLabel.Caption := 'Verifying...';
   VerifyLabel.Font.Color := clBlue;
 
-  if Exec('cmd.exe', '/c ' + Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
-    if ResultCode = 0 then begin
-      VerifyLabel.Caption := 'Connection verified!';
-      VerifyLabel.Font.Color := clGreen;
-    end else begin
-      VerifyLabel.Caption := 'Verification failed. You can configure later.';
-      VerifyLabel.Font.Color := clRed;
-    end;
+  // Try host Python first (fast path: no WSL round-trip).  If that fails for
+  // ANY reason — missing python.exe, network error, bad key, wrong model —
+  // fall through to WSL.  That way a teammate without Windows Python still
+  // gets a real verification against the API rather than a false "failed".
+  Ok := TryVerifyViaHostPython(ScriptPath, Args);
+  if not Ok then begin
+    Ok := TryVerifyViaWsl(ScriptPath, Args);
+  end;
+
+  if Ok then begin
+    VerifyLabel.Caption := 'Connection verified!';
+    VerifyLabel.Font.Color := clGreen;
   end else begin
-    VerifyLabel.Caption := 'Could not run verification.';
+    VerifyLabel.Caption := 'Verification failed. You can configure later.';
     VerifyLabel.Font.Color := clRed;
   end;
 end;
