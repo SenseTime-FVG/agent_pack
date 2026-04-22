@@ -416,11 +416,87 @@ _ap_resolve_cli() {
     return 1
 }
 
+_ap_is_wsl() {
+    grep -qi microsoft /proc/version 2>/dev/null || grep -qi wsl /proc/sys/kernel/osrelease 2>/dev/null
+}
+
+_ap_dashboard_url() {
+    local openclaw_cli="$1"
+    local out line url
+
+    out="$("$openclaw_cli" dashboard --no-open 2>/dev/null || true)"
+    while IFS= read -r line; do
+        case "$line" in
+            Dashboard\ URL:*)
+                url="${line#Dashboard URL: }"
+                printf '%s\n' "$url"
+                return 0
+                ;;
+        esac
+    done <<< "$out"
+
+    return 1
+}
+
+_ap_dashboard_url_with_session() {
+    local url="$1"
+    if [ -z "$url" ]; then
+        return 1
+    fi
+    case "$url" in
+        *session=*)
+            printf '%s\n' "$url"
+            ;;
+        *#*)
+            printf '%s&session=main\n' "$url"
+            ;;
+        *)
+            printf '%s#session=main\n' "$url"
+            ;;
+    esac
+}
+
+_ap_open_dashboard_url() {
+    local url="$1"
+    local ps_url
+
+    if command -v wslview >/dev/null 2>&1; then
+        wslview "$url" >/dev/null 2>&1
+        return $?
+    fi
+
+    if _ap_is_wsl && command -v powershell.exe >/dev/null 2>&1; then
+        ps_url="${url//\'/\'\'}"
+        powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process '$ps_url'" >/dev/null 2>&1
+        return $?
+    fi
+
+    if command -v xdg-open >/dev/null 2>&1 && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+        xdg-open "$url" >/dev/null 2>&1
+        return $?
+    fi
+
+    return 1
+}
+
 _ap_schedule_dashboard() {
     local openclaw_cli="$1"
-    # Give the gateway a few seconds to bind before opening the browser
-    # (dashboard itself doesn't probe, so we sleep for the user's sake).
-    ( sleep 3 && "$openclaw_cli" dashboard >/dev/null 2>&1 ) &
+    local dashboard_url=""
+
+    dashboard_url="$(_ap_dashboard_url "$openclaw_cli" || true)"
+    if [ -z "$dashboard_url" ]; then
+        echo "[!] Could not resolve the OpenClaw dashboard URL automatically."
+        echo "[!] After startup, run: openclaw dashboard"
+        return 1
+    fi
+
+    dashboard_url="$(_ap_dashboard_url_with_session "$dashboard_url")"
+    echo "[*] OpenClaw dashboard URL: $dashboard_url"
+
+    (
+        sleep 3
+        _ap_open_dashboard_url "$dashboard_url" || true
+    ) >/dev/null 2>&1 &
     disown 2>/dev/null || true
 }
 
@@ -448,16 +524,18 @@ if _ap_has openclaw && _ap_has hermes; then
     echo "[*] Starting openclaw gateway in the background (log: $_openclaw_log)..."
     nohup "$_OPENCLAW_CLI" gateway --verbose >"$_openclaw_log" 2>&1 &
     disown 2>/dev/null || true
-    _ap_schedule_dashboard "$_OPENCLAW_CLI"
-    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
+    if _ap_schedule_dashboard "$_OPENCLAW_CLI"; then
+        echo "[*] Attempting to open OpenClaw dashboard in your browser..."
+    fi
     echo "[*] Starting hermes in this window..."
     exec "$_HERMES_CLI"
 elif _ap_has hermes; then
     echo "[*] Starting hermes in this window..."
     exec "$_HERMES_CLI"
 elif _ap_has openclaw; then
-    _ap_schedule_dashboard "$_OPENCLAW_CLI"
-    echo "[*] Opening OpenClaw dashboard in your browser shortly..."
+    if _ap_schedule_dashboard "$_OPENCLAW_CLI"; then
+        echo "[*] Attempting to open OpenClaw dashboard in your browser..."
+    fi
     echo "[*] Starting openclaw gateway in this window..."
     exec "$_OPENCLAW_CLI" gateway --verbose
 fi
