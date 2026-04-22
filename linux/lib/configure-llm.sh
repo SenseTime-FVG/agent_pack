@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interactive LLM provider configuration.
+# Interactive and non-interactive LLM provider configuration.
 # Provider details (base_url, default_model, signup_url) are read from
 # config/defaults.json so there is a single source of truth.
 #
@@ -18,6 +18,65 @@ _DEFAULTS_JSON="$(cd "$SCRIPT_DIR/../.." && pwd)/config/defaults.json"
 # Helper: read a value from defaults.json
 _cfg() { python3 -c "import json; print(json.load(open('$_DEFAULTS_JSON'))$1)" 2>/dev/null; }
 
+_llm_provider_name() { _cfg "['llm_providers']['$1']['name']"; }
+_llm_default_base_url() { _cfg "['llm_providers']['$1']['base_url']"; }
+_llm_default_model() { _cfg "['llm_providers']['$1']['default_model']"; }
+_llm_signup_url() { _cfg "['llm_providers']['$1']['signup_url']"; }
+
+_llm_known_provider() {
+    case "$1" in
+        openrouter|openai|anthropic|custom) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+_llm_fill_defaults() {
+    if [ -z "$LLM_PROVIDER" ]; then
+        LLM_PROVIDER="openrouter"
+    fi
+    if [ "$LLM_PROVIDER" != "custom" ]; then
+        if [ -z "$LLM_BASE_URL" ]; then
+            LLM_BASE_URL="$(_llm_default_base_url "$LLM_PROVIDER")"
+        fi
+        if [ -z "$LLM_MODEL" ]; then
+            LLM_MODEL="$(_llm_default_model "$LLM_PROVIDER")"
+        fi
+    fi
+}
+
+prepare_llm_config_noninteractive() {
+    if [ -z "$LLM_PROVIDER$LLM_BASE_URL$LLM_MODEL$LLM_API_KEY" ]; then
+        echo "[*] Non-interactive mode: no LLM config supplied; product config will be skipped."
+        return 0
+    fi
+
+    _llm_fill_defaults
+
+    if ! _llm_known_provider "$LLM_PROVIDER"; then
+        echo "[!] ERROR: Unsupported LLM provider '$LLM_PROVIDER'." >&2
+        echo "    Supported values: openrouter, openai, anthropic, custom." >&2
+        return 1
+    fi
+
+    if [ "$LLM_PROVIDER" = "custom" ]; then
+        if [ -z "$LLM_BASE_URL" ]; then
+            echo "[!] ERROR: --base-url is required when --provider custom is used." >&2
+            return 1
+        fi
+        if [ -z "$LLM_MODEL" ]; then
+            echo "[!] ERROR: --model is required when --provider custom is used." >&2
+            return 1
+        fi
+    fi
+
+    if [ -z "$LLM_API_KEY" ]; then
+        echo "[*] Non-interactive mode: no API key supplied; product config will be skipped."
+        return 0
+    fi
+
+    echo "[*] Using non-interactive LLM config: provider=$LLM_PROVIDER model=$LLM_MODEL"
+}
+
 # Exported by collect_llm_config, consumed by apply_llm_config.
 # Use ":=" so that callers who pre-populated these (e.g. Windows's
 # install-hermes.ps1 passing LLM_* via the WSL bash body) are preserved.
@@ -33,10 +92,10 @@ collect_llm_config() {
     echo "========================================"
     echo ""
     echo "Select your LLM provider:"
-    echo "  1) $(_cfg "['llm_providers']['openrouter']['name']")"
-    echo "  2) $(_cfg "['llm_providers']['openai']['name']")"
-    echo "  3) $(_cfg "['llm_providers']['anthropic']['name']")"
-    echo "  4) $(_cfg "['llm_providers']['custom']['name']")"
+    echo "  1) $(_llm_provider_name openrouter)"
+    echo "  2) $(_llm_provider_name openai)"
+    echo "  3) $(_llm_provider_name anthropic)"
+    echo "  4) $(_llm_provider_name custom)"
     echo ""
 
     local choice
@@ -46,16 +105,16 @@ collect_llm_config() {
     local provider base_url default_model
     case "$choice" in
         1) provider="openrouter"
-           base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
-           default_model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           base_url="$(_llm_default_base_url openrouter)"
+           default_model="$(_llm_default_model openrouter)"
            ;;
         2) provider="openai"
-           base_url="$(_cfg "['llm_providers']['openai']['base_url']")"
-           default_model="$(_cfg "['llm_providers']['openai']['default_model']")"
+           base_url="$(_llm_default_base_url openai)"
+           default_model="$(_llm_default_model openai)"
            ;;
         3) provider="anthropic"
-           base_url="$(_cfg "['llm_providers']['anthropic']['base_url']")"
-           default_model="$(_cfg "['llm_providers']['anthropic']['default_model']")"
+           base_url="$(_llm_default_base_url anthropic)"
+           default_model="$(_llm_default_model anthropic)"
            ;;
         4) provider="custom"
            read -rp "Base URL: " base_url
@@ -63,8 +122,8 @@ collect_llm_config() {
            ;;
         *) echo "Invalid choice, defaulting to OpenRouter."
            provider="openrouter"
-           base_url="$(_cfg "['llm_providers']['openrouter']['base_url']")"
-           default_model="$(_cfg "['llm_providers']['openrouter']['default_model']")"
+           base_url="$(_llm_default_base_url openrouter)"
+           default_model="$(_llm_default_model openrouter)"
            ;;
     esac
 
@@ -88,7 +147,7 @@ collect_llm_config() {
     fi
 
     local signup_url
-    signup_url="$(_cfg "['llm_providers']['$provider']['signup_url']")"
+    signup_url="$(_llm_signup_url "$provider")"
     if [ -n "$signup_url" ]; then
         echo ""
         echo "Get your key at: $signup_url"

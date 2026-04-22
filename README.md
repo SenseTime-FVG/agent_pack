@@ -91,7 +91,7 @@ Pre-built installers live on the [GitHub Releases page](https://github.com/Sense
 |----------|----------|------------|
 | Windows | [Grab the `-windows-x64.exe` from the latest release](https://github.com/SenseTime-FVG/agent_pack/releases/latest) | Double-click and follow the wizard; installation runs inside WSL2, and the PowerShell window is taken over by the installed agent when setup finishes |
 | macOS | [Grab the `-macos-universal.pkg` from the latest release](https://github.com/SenseTime-FVG/agent_pack/releases/latest) | Double-click, then complete setup in the macOS wizard for product selection and LLM configuration; when setup finishes it opens the selected OpenClaw Gateway Terminal plus dashboard, and the Hermes Terminal when chosen |
-| Linux | [Grab the `-linux.sh` from the latest release](https://github.com/SenseTime-FVG/agent_pack/releases/latest) *or* the one-liner below | Download and run `chmod +x AgentPack-*-linux.sh && ./AgentPack-*-linux.sh`, or paste `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — either way the shell that ran the installer is handed over to the agent via `exec` |
+| Linux | [Grab the `-linux.sh` from the latest release](https://github.com/SenseTime-FVG/agent_pack/releases/latest) *or* the one-liner below | Download and run `chmod +x AgentPack-*-linux.sh && ./AgentPack-*-linux.sh`, or paste `bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh)` — either way the shell that ran the installer is handed over to the agent via `exec` |
 
 ## Building from Source
 
@@ -122,7 +122,17 @@ Output: `dist/AgentPack-<ver>-macos-universal.pkg`
 No build step needed. Distribute `linux/install.sh` and `linux/lib/` together, or host the full repo and use:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh)
+```
+
+For unattended installs, pass `--yes` plus any config overrides you want:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh) \
+  --yes \
+  --product hermes \
+  --provider openrouter \
+  --api-key sk-...
 ```
 
 ## Configuration

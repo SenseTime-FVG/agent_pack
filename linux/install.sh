@@ -12,14 +12,14 @@ set -euo pipefail
 # no LLM config written.  Rebind stdin to the controlling tty so prompts
 # work in that flow.  No-op when stdin is already a tty (plain `bash
 # install.sh`) or when there's no tty to fall back to (CI, containers).
-if [ ! -t 0 ] && [ -r /dev/tty ]; then
-    exec </dev/tty
-fi
-
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$INSTALLER_DIR/lib"
 AGENT_PACK_CLONE_ROOT=""
 AGENT_PACK_TEMP_ROOT=""
+INTERACTIVE_MODE=1
+LAUNCH_AFTER_INSTALL=-1
+PRESET_LLM_CONFIG=0
+PRODUCT_SELECTION="${PRODUCT_SELECTION:-}"
 
 _ap_cleanup() {
     if [ -n "$AGENT_PACK_TEMP_ROOT" ] && [ -d "$AGENT_PACK_TEMP_ROOT" ]; then
@@ -29,7 +29,162 @@ _ap_cleanup() {
 
 trap _ap_cleanup EXIT
 
-# If running via curl | bash, download the full package first.
+_ap_usage() {
+    cat <<'EOF'
+Usage: bash install.sh [options]
+
+Interactive install:
+  bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh)
+
+Non-interactive install:
+  bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh) \
+    --yes --product hermes --provider openrouter --api-key sk-...
+
+Options:
+  -h, --help                  Show this help message
+  -y, --yes, --non-interactive
+                              Disable prompts; default product is hermes
+  --product VALUE            hermes | openclaw | both
+  --provider VALUE           openrouter | openai | anthropic | custom
+  --base-url URL             Base URL for the selected provider
+  --model MODEL              Model ID to write into product config
+  --api-key KEY              API key to write into product config
+  --skip-llm-config          Skip writing LLM credentials/config
+  --launch                   Launch installed product(s) at the end
+  --no-launch                Do not launch installed product(s) at the end
+EOF
+}
+
+_ap_require_arg() {
+    local flag="$1"
+    local value="${2-}"
+    if [ -z "$value" ]; then
+        echo "[!] Missing value for $flag." >&2
+        exit 1
+    fi
+}
+
+_ap_parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                _ap_usage
+                exit 0
+                ;;
+            -y|--yes|--non-interactive)
+                INTERACTIVE_MODE=0
+                ;;
+            --launch)
+                LAUNCH_AFTER_INSTALL=1
+                ;;
+            --no-launch)
+                LAUNCH_AFTER_INSTALL=0
+                ;;
+            --product)
+                _ap_require_arg "$1" "${2-}"
+                PRODUCT_SELECTION="$2"
+                shift
+                ;;
+            --product=*)
+                PRODUCT_SELECTION="${1#*=}"
+                ;;
+            --provider)
+                _ap_require_arg "$1" "${2-}"
+                LLM_PROVIDER="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+                PRESET_LLM_CONFIG=1
+                shift
+                ;;
+            --provider=*)
+                LLM_PROVIDER="$(printf '%s' "${1#*=}" | tr '[:upper:]' '[:lower:]')"
+                PRESET_LLM_CONFIG=1
+                ;;
+            --base-url)
+                _ap_require_arg "$1" "${2-}"
+                LLM_BASE_URL="$2"
+                PRESET_LLM_CONFIG=1
+                shift
+                ;;
+            --base-url=*)
+                LLM_BASE_URL="${1#*=}"
+                PRESET_LLM_CONFIG=1
+                ;;
+            --model)
+                _ap_require_arg "$1" "${2-}"
+                LLM_MODEL="$2"
+                PRESET_LLM_CONFIG=1
+                shift
+                ;;
+            --model=*)
+                LLM_MODEL="${1#*=}"
+                PRESET_LLM_CONFIG=1
+                ;;
+            --api-key)
+                _ap_require_arg "$1" "${2-}"
+                LLM_API_KEY="$2"
+                PRESET_LLM_CONFIG=1
+                shift
+                ;;
+            --api-key=*)
+                LLM_API_KEY="${1#*=}"
+                PRESET_LLM_CONFIG=1
+                ;;
+            --skip-llm-config)
+                LLM_PROVIDER=""
+                LLM_BASE_URL=""
+                LLM_MODEL=""
+                LLM_API_KEY=""
+                PRESET_LLM_CONFIG=1
+                ;;
+            *)
+                echo "[!] Unknown option: $1" >&2
+                echo "" >&2
+                _ap_usage >&2
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
+_ap_set_selected_products() {
+    local choice
+    choice="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$choice" in
+        1|hermes)
+            SELECTED_PRODUCTS=("hermes")
+            ;;
+        2|openclaw)
+            SELECTED_PRODUCTS=("openclaw")
+            ;;
+        3|both)
+            SELECTED_PRODUCTS=("hermes" "openclaw")
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+_ap_parse_args "$@"
+
+if [ "$LAUNCH_AFTER_INSTALL" -lt 0 ]; then
+    if [ "$INTERACTIVE_MODE" -eq 1 ]; then
+        LAUNCH_AFTER_INSTALL=1
+    else
+        LAUNCH_AFTER_INSTALL=0
+    fi
+fi
+
+if [ "$INTERACTIVE_MODE" -eq 1 ] && [ ! -t 0 ]; then
+    echo "[!] Interactive install needs a terminal for prompts." >&2
+    echo "    Use:" >&2
+    echo "      bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh)" >&2
+    echo "    Or run unattended with:" >&2
+    echo "      bash <(curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh) --yes [options]" >&2
+    exit 1
+fi
+
+# If running from a one-liner bootstrap, download the full package first.
 # This bootstrap can't read config/defaults.json yet (we haven't fetched it),
 # so the repo URL + CN mirrors are duplicated here as a minimal bootstrap.
 # Keep the mirror list in sync with config/defaults.json (agent_pack.cn_mirrors).
@@ -68,6 +223,10 @@ fi
 source "$LIB_DIR/install-hermes.sh"
 source "$LIB_DIR/install-openclaw.sh"
 source "$LIB_DIR/configure-llm.sh"
+
+if [ "$PRESET_LLM_CONFIG" -eq 0 ] && [ -n "$LLM_PROVIDER$LLM_BASE_URL$LLM_MODEL$LLM_API_KEY" ]; then
+    PRESET_LLM_CONFIG=1
+fi
 
 # CN-region environment setup: mirror env vars + TUNA apt + pre-installed uv.
 # Driven by AGENTPACK_CN=1 or a CN network probe inside cn-env.sh's caller.
@@ -116,27 +275,40 @@ echo ""
 # ---- Step 1: Collect LLM Configuration ----
 # Ask up front (mirrors the Windows installer wizard) so the user is done
 # with interactive prompts before the long-running installs start.
-collect_llm_config
-verify_llm_config_interactive || exit 1
+if [ "$INTERACTIVE_MODE" -eq 1 ] && [ "$PRESET_LLM_CONFIG" -eq 0 ]; then
+    collect_llm_config
+else
+    prepare_llm_config_noninteractive || exit 1
+fi
+if [ "$INTERACTIVE_MODE" -eq 1 ]; then
+    verify_llm_config_interactive || exit 1
+fi
 
 # ---- Step 2: Product Selection ----
 SELECTED_PRODUCTS=()
-while true; do
-    echo ""
-    echo "Which products would you like to install?"
-    echo "  1) Hermes Agent"
-    echo "  2) OpenClaw"
-    echo "  3) Both"
-    echo ""
-    read -rp "Choice [1/2/3]: " product_choice
+if [ -n "$PRODUCT_SELECTION" ]; then
+    if ! _ap_set_selected_products "$PRODUCT_SELECTION"; then
+        echo "[!] Invalid --product value '$PRODUCT_SELECTION'. Use hermes, openclaw, or both." >&2
+        exit 1
+    fi
+elif [ "$INTERACTIVE_MODE" -eq 1 ]; then
+    while true; do
+        echo ""
+        echo "Which products would you like to install?"
+        echo "  1) Hermes Agent"
+        echo "  2) OpenClaw"
+        echo "  3) Both"
+        echo ""
+        read -rp "Choice [1/2/3]: " product_choice
 
-    case "$product_choice" in
-        1) SELECTED_PRODUCTS=("hermes") ; break ;;
-        2) SELECTED_PRODUCTS=("openclaw") ; break ;;
-        3) SELECTED_PRODUCTS=("hermes" "openclaw") ; break ;;
-        *) echo "Please choose 1, 2, or 3." ;;
-    esac
-done
+        if _ap_set_selected_products "$product_choice"; then
+            break
+        fi
+        echo "Please choose 1, 2, or 3."
+    done
+else
+    _ap_set_selected_products "hermes"
+fi
 
 echo ""
 echo "Selected: ${SELECTED_PRODUCTS[*]}"
@@ -170,6 +342,11 @@ done
 echo ""
 echo "  You may need to restart your shell or run: source ~/.bashrc"
 echo ""
+
+if [ "$LAUNCH_AFTER_INSTALL" -ne 1 ]; then
+    echo "[*] Install finished without launching agent processes."
+    exit 0
+fi
 
 # ---- Step 4: Launch Installed Products In This Window ----
 # Take over this install session with the selected agent(s).  When both are
