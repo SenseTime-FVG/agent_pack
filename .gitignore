@@ -1,2 +1,4 @@
 dist/*
 *.exe
+# Local runtime logs dropped by linux/install.sh when run from this directory.
+install-*.log

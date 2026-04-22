@@ -67,15 +67,43 @@ install_openclaw() {
         child_path="$npm_prefix/bin:$child_path"
     fi
 
-    PATH="$child_path" bash "$install_script" \
-        --install-method git \
-        --source-ready \
-        --git-dir "$OPENCLAW_INSTALL_DIR" \
-        --no-onboard --no-prompt
+    # AGENTPACK_VERBOSE=1 propagates to upstream install.sh as OPENCLAW_VERBOSE,
+    # which unfolds every run_quiet_step (default behavior hides stdout/stderr
+    # unless the step fails, and even then only tail -n 80 is emitted — which
+    # has repeatedly hidden real root causes for us).
+    local verbose_arg=()
+    if [ "${AGENTPACK_VERBOSE:-0}" = "1" ]; then
+        verbose_arg=(--verbose)
+    fi
+
+    PATH="$child_path" OPENCLAW_VERBOSE="${AGENTPACK_VERBOSE:-0}" \
+        bash "$install_script" \
+            --install-method git \
+            --source-ready \
+            --git-dir "$OPENCLAW_INSTALL_DIR" \
+            --no-onboard --no-prompt \
+            "${verbose_arg[@]}"
     local rc=$?
     if [ $rc -ne 0 ]; then
         echo "[!] ERROR: OpenClaw installation failed (exit code $rc)."
         return 1
+    fi
+
+    # Upstream install.sh demotes `pnpm ui:build` failures to a warning
+    # ("UI build failed; continuing (CLI may still work)") and returns 0,
+    # which is how we ended up shipping installs where `openclaw gateway`
+    # later fails with "Control UI assets not found".  Detect the missing
+    # product directly and retry ui:build loudly — if it still fails, fall
+    # back to a clear error so the user isn't stuck with a half-working CLI.
+    local ui_dist="$OPENCLAW_INSTALL_DIR/dist/control-ui"
+    if [ ! -f "$ui_dist/index.html" ]; then
+        echo "[!] Control UI assets missing at $ui_dist — retrying ui:build with full output..."
+        if ! ( cd "$OPENCLAW_INSTALL_DIR" && PATH="$child_path" pnpm ui:build ); then
+            echo "[!] ERROR: pnpm ui:build failed. Run with AGENTPACK_VERBOSE=1 to see the dependency install step in full." >&2
+            echo "    You can complete the install manually by running:" >&2
+            echo "      cd $OPENCLAW_INSTALL_DIR && pnpm install && pnpm ui:build && pnpm build" >&2
+            return 1
+        fi
     fi
 
     # Enable local gateway mode unconditionally so `openclaw gateway` works

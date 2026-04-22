@@ -348,8 +348,24 @@ print(json.dumps({
                 "$provider_json" --strict-json
             echo "[OK] OpenClaw provider registered: ${provider_prefix} -> ${model} (${api_dialect})"
 
-            openclaw config set agents.defaults.model "${provider_prefix}/${model}"
-            echo "[OK] OpenClaw model set via 'openclaw config set'"
+            # Use `openclaw models set` rather than `config set agents.defaults.model`:
+            # `models set` also:
+            #   - upserts agents.defaults.models[<key>] (the allowlist the
+            #     control UI / session resolver reads)
+            #   - canonicalizes the key via the alias index
+            #   - handles provider/model vs. legacy string forms
+            # Without this, the UI's chat-model dropdown silently falls back
+            # to a bundled default (e.g. openai/gpt-4o-mini) because the raw
+            # "provider/model" string isn't in the allowlist.
+            if ! openclaw models set "${provider_prefix}/${model}" >/dev/null 2>&1; then
+                # Fallback: some older openclaw builds don't have `models set`
+                # yet.  `config set agents.defaults.model` at least keeps the
+                # primary correct even though allowlist won't get the entry.
+                openclaw config set agents.defaults.model "${provider_prefix}/${model}"
+                echo "[OK] OpenClaw default model set (via 'config set' fallback)"
+            else
+                echo "[OK] OpenClaw default model set: ${provider_prefix}/${model}"
+            fi
             # Note: gateway.mode=local is set unconditionally by
             # install-openclaw.sh right after install, so it works even when
             # the user skipped LLM setup.
