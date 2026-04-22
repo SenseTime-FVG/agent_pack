@@ -57,7 +57,7 @@ command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
 
 # Extract the version from the tag (strip leading v).  We use it to locate
 # files by exact name, so a tag like v1.0.0 must match the
-# AgentPack-1.0.0-<platform>[-<arch>].<ext> naming produced by the builders.
+# AgentPack-<ver>-<platform>[-<arch>].<ext> naming produced by the builders.
 VER="${TAG#v}"
 EXE="$DIST_DIR/AgentPack-${VER}-windows-x64.exe"
 PKG="$DIST_DIR/AgentPack-${VER}-macos-universal.pkg"
