@@ -13,7 +13,7 @@
     <choice id="default"/>
     <choice id="com.agentpack.pkg" visible="true" enabled="true"
             title="Agent Pack"
-            description="Install Agent Pack files and launch interactive setup.">
+            description="安装 Agent Pack 文件并启动图形化设置向导。">
         <pkg-ref id="com.agentpack.pkg"/>
     </choice>
     <pkg-ref id="com.agentpack.pkg"

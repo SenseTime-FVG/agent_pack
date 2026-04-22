@@ -21,12 +21,22 @@ cp -R "$PROJECT_ROOT/shared" "$BUILD_DIR/payload/usr/local/lib/agent-pack/shared
 cp -R "$PROJECT_ROOT/config" "$BUILD_DIR/payload/usr/local/lib/agent-pack/config"
 mkdir -p "$BUILD_DIR/payload/usr/local/lib/agent-pack/linux"
 cp -R "$PROJECT_ROOT/linux/lib" "$BUILD_DIR/payload/usr/local/lib/agent-pack/linux/lib"
+mkdir -p "$BUILD_DIR/payload/usr/local/lib/agent-pack/macos"
+cp -R "$PROJECT_ROOT/macos/lib/." "$BUILD_DIR/payload/usr/local/lib/agent-pack/macos/"
+chmod 755 "$BUILD_DIR/payload/usr/local/lib/agent-pack/shared/verify-llm-curl.sh"
+chmod 755 "$BUILD_DIR/payload/usr/local/lib/agent-pack/macos/gui-setup.sh"
+chmod 755 "$BUILD_DIR/payload/usr/local/lib/agent-pack/macos/product-session.sh"
 
 # pkgbuild requires runnable preinstall/postinstall scripts. Stage them in a
 # temp directory with executable permissions so the macOS package runs
 # reliably regardless of repo mode bits.
 cp "$SCRIPT_DIR/scripts/preinstall.sh" "$SCRIPTS_DIR/preinstall"
 cp "$SCRIPT_DIR/scripts/postinstall.sh" "$SCRIPTS_DIR/postinstall"
+cp "$PROJECT_ROOT/macos/lib/gui-wizard.swift" "$SCRIPTS_DIR/gui-wizard.swift"
+cp "$PROJECT_ROOT/config/defaults.json" "$SCRIPTS_DIR/defaults.json"
+cp "$PROJECT_ROOT/shared/verify-llm-curl.sh" "$SCRIPTS_DIR/verify-llm-curl.sh"
+chmod 644 "$SCRIPTS_DIR/gui-wizard.swift" "$SCRIPTS_DIR/defaults.json"
+chmod 755 "$SCRIPTS_DIR/verify-llm-curl.sh"
 chmod 755 "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 # Build component package

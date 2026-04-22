@@ -114,6 +114,21 @@ _llm_verify_once() {
     fi
     _LLM_VERIFIED_THIS_SESSION=1
 
+    if [ "${DISTRO_ID:-}" = "macos" ] && command -v curl &>/dev/null \
+        && [ -f "$SHARED_DIR/verify-llm-curl.sh" ]; then
+        echo "[*] Verifying API connection..."
+        if bash "$SHARED_DIR/verify-llm-curl.sh" \
+            --provider "$LLM_PROVIDER" \
+            --api-key "$LLM_API_KEY" \
+            --base-url "$LLM_BASE_URL" \
+            --model "$LLM_MODEL"; then
+            echo "[OK] Connection verified!"
+        else
+            echo "WARNING: Could not verify connection. Saving config anyway."
+        fi
+        return 0
+    fi
+
     local python_cmd="${PYTHON_CMD:-python3}"
     if command -v "$python_cmd" &>/dev/null && [ -f "$SHARED_DIR/verify-llm.py" ]; then
         echo "[*] Verifying API connection..."
