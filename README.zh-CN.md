@@ -88,9 +88,9 @@ Bundled skills 已经直接放进 `repos/hermes-agent/skills/` 和 `repos/opencl
 
 | 平台 | 下载 | 使用方式 |
 |------|------|---------|
-| Windows | [`AgentPack-1.0.1-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.1-windows-x64.exe) | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
-| macOS | [`AgentPack-1.0.1-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.1-macos-universal.pkg) | 双击后在自动打开的 Terminal 窗口中完成安装；安装结束后同一个窗口会变成 agent 的 REPL / gateway |
-| Linux | [`AgentPack-1.0.1-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.1-linux.sh) 或下面的一行命令 | 下载后 `chmod +x AgentPack-1.0.1-linux.sh && ./AgentPack-1.0.1-linux.sh`，或直接粘贴 `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — 两种方式都会在安装结束后用 `exec` 在当前 shell 里拉起 agent |
+| Windows | [`AgentPack-1.0.2-windows-x64.exe`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.2-windows-x64.exe) | 双击运行向导；安装过程在 WSL2 中执行，安装完成后当前 PowerShell 窗口会被接管，直接跑起 agent |
+| macOS | [`AgentPack-1.0.2-macos-universal.pkg`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.2-macos-universal.pkg) | 双击后在自动打开的 Terminal 窗口中完成安装；安装结束后同一个窗口会变成 agent 的 REPL / gateway |
+| Linux | [`AgentPack-1.0.2-linux.sh`](https://github.com/SenseTime-FVG/agent_pack/releases/latest/download/AgentPack-1.0.2-linux.sh) 或下面的一行命令 | 下载后 `chmod +x AgentPack-1.0.2-linux.sh && ./AgentPack-1.0.2-linux.sh`，或直接粘贴 `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agent_pack/main/linux/install.sh \| bash` — 两种方式都会在安装结束后用 `exec` 在当前 shell 里拉起 agent |
 
 ## 从源码构建
 
@@ -103,7 +103,7 @@ cd windows
 iscc installer.iss
 ```
 
-产物：`dist/AgentPack-1.0.1-windows-x64.exe`
+产物：`dist/AgentPack-1.0.2-windows-x64.exe`
 
 ### macOS (.pkg)
 
@@ -114,7 +114,7 @@ cd macos
 ./build-pkg.sh
 ```
 
-产物：`dist/AgentPack-1.0.1-macos-universal.pkg`
+产物：`dist/AgentPack-1.0.2-macos-universal.pkg`
 
 ### Linux
 

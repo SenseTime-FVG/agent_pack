@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6.x
 
 #define MyAppName "Agent Pack"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Agent Pack"
 #define MyAppURL "https://github.com/SenseTime-FVG/agent_pack"
 
@@ -271,15 +271,53 @@ begin
   Result := Args;
 end;
 
-// Try to run verify-llm.py through the host's Python.  Returns True iff the
-// process launched AND exited 0.  Any other combination (Python not found,
-// API failure, etc.) returns False so the caller can fall through to WSL.
-function TryVerifyViaHostPython(const ScriptPath, Args: String): Boolean;
+// Read up to MaxBytes of LogPath; return a trimmed string.  Used to grab the
+// stdout+stderr of the verify step so we can show the user the actual error
+// (Python not found, 401, unknown model, ...) instead of a blanket "failed".
+function ReadLogTail(const LogPath: String; MaxBytes: Integer): String;
+var
+  Lines: TArrayOfString;
+  i, StartIdx: Integer;
+  Body: String;
+begin
+  Result := '';
+  if not FileExists(LogPath) then begin
+    Exit;
+  end;
+  if not LoadStringsFromFile(LogPath, Lines) then begin
+    Exit;
+  end;
+  // Show the last ~20 lines — enough for a python traceback + the
+  // "ERROR: <urllib.error ...>" line that verify-llm.py emits.
+  StartIdx := GetArrayLength(Lines) - 20;
+  if StartIdx < 0 then StartIdx := 0;
+  Body := '';
+  for i := StartIdx to GetArrayLength(Lines) - 1 do begin
+    Body := Body + Lines[i] + #13#10;
+  end;
+  if Length(Body) > MaxBytes then begin
+    Body := Copy(Body, Length(Body) - MaxBytes + 1, MaxBytes);
+  end;
+  Result := Trim(Body);
+end;
+
+// Try to run verify-llm.py through the host's Python.  Captures combined
+// stdout+stderr into LogPath (caller-provided) so we can report the actual
+// error back to the user on failure.  Returns True iff the process launched
+// AND exited 0.  Any other combination (Python not found, API failure, etc.)
+// returns False so the caller can fall through to WSL.
+function TryVerifyViaHostPython(const ScriptPath, Args, LogPath: String): Boolean;
 var
   ResultCode: Integer;
   FullCmd: String;
 begin
-  FullCmd := '/c python "' + ScriptPath + '"' + Args;
+  // Prepend a marker line so the user can see which backend the message
+  // came from when the log bubbles up in the error dialog.
+  SaveStringToFile(LogPath, '=== host python ===' + #13#10, False);
+  // `>> ... 2>&1` appends both streams; the marker line above becomes
+  // the first entry of the log for this backend.
+  FullCmd := '/c python "' + ScriptPath + '"' + Args
+    + ' >> "' + LogPath + '" 2>&1';
   Result := Exec('cmd.exe', FullCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
     and (ResultCode = 0);
 end;
@@ -306,12 +344,14 @@ end;
 // Fallback: run verify-llm.py through WSL's python3.  Every Windows install
 // target already has WSL2 + a distro set up (Agent Pack requires it), so
 // python3 is reliably available there even when the user hasn't installed
-// Python on the Windows host.  Returns True iff wsl.exe ran AND exited 0.
-function TryVerifyViaWsl(const ScriptPath, Args: String): Boolean;
+// Python on the Windows host.  Captures combined stdout+stderr into LogPath.
+// Returns True iff wsl.exe ran AND exited 0.
+function TryVerifyViaWsl(const ScriptPath, Args, LogPath: String): Boolean;
 var
   ResultCode: Integer;
   WslPath, BashCmd, Cmd: String;
 begin
+  SaveStringToFile(LogPath, #13#10 + '=== WSL python3 ===' + #13#10, True);
   // wslpath -a converts C:\foo\bar.py → /mnt/c/foo/bar.py; easier to shell
   // the conversion out than to translate path separators ourselves.
   // We wrap the full bash program in single quotes and escape any ' inside
@@ -320,19 +360,23 @@ begin
   WslPath := ExpandConstant('{app}') + '\shared\verify-llm.py';
   BashCmd := 'python3 "$(wslpath -a "' + WslPath + '")"'
     + BashSingleQuoteEscape(Args);
-  Cmd := '/c wsl.exe -- bash -lc ''' + BashCmd + '''';
+  Cmd := '/c wsl.exe -- bash -lc ''' + BashCmd + ''' >> "' + LogPath + '" 2>&1';
   Result := Exec('cmd.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
     and (ResultCode = 0);
 end;
 
 procedure OnVerifyClick(Sender: TObject);
 var
-  ScriptPath, Args, Provider: String;
+  ScriptPath, Args, Provider, LogPath, LogTail, Dialog: String;
   Ok: Boolean;
 begin
   Provider := GetProviderName(GetSelectedProviderIndex);
   ScriptPath := ExpandConstant('{app}') + '\shared\verify-llm.py';
   Args := BuildVerifyArgs(Provider);
+  // Redirect both attempts' stdout+stderr to one log so we can replay the
+  // full story in the error dialog.  Lives in %TEMP% so it doesn't leak
+  // the API key beyond this session (deleted on logoff with the rest).
+  LogPath := ExpandConstant('{tmp}') + '\agent-pack-verify.log';
 
   VerifyLabel.Caption := 'Verifying...';
   VerifyLabel.Font.Color := clBlue;
@@ -341,17 +385,32 @@ begin
   // ANY reason — missing python.exe, network error, bad key, wrong model —
   // fall through to WSL.  That way a teammate without Windows Python still
   // gets a real verification against the API rather than a false "failed".
-  Ok := TryVerifyViaHostPython(ScriptPath, Args);
+  Ok := TryVerifyViaHostPython(ScriptPath, Args, LogPath);
   if not Ok then begin
-    Ok := TryVerifyViaWsl(ScriptPath, Args);
+    Ok := TryVerifyViaWsl(ScriptPath, Args, LogPath);
   end;
 
   if Ok then begin
     VerifyLabel.Caption := 'Connection verified!';
     VerifyLabel.Font.Color := clGreen;
   end else begin
-    VerifyLabel.Caption := 'Verification failed. You can configure later.';
+    VerifyLabel.Caption := 'Verification failed. Click Verify for details.';
     VerifyLabel.Font.Color := clRed;
+    // Show the actual error in a dialog.  Common cases:
+    //   - "'python' is not recognized..."  → no host Python (fell through
+    //     to WSL, which also failed — usually because WSL isn't set up yet)
+    //   - "ERROR: HTTP Error 401: Unauthorized"       → wrong API key
+    //   - "ERROR: Unknown model ..."                  → typo in model id
+    //   - "ERROR: <urlopen error ...>"                → no network / DNS
+    LogTail := ReadLogTail(LogPath, 3000);
+    if LogTail = '' then begin
+      LogTail := '(no output captured — the verify command probably could not be launched)';
+    end;
+    Dialog := 'Verification failed.' + #13#10#13#10
+      + 'Details:' + #13#10 + LogTail + #13#10#13#10
+      + 'Full log: ' + LogPath + #13#10#13#10
+      + 'You can continue the install and fix the config later.';
+    MsgBox(Dialog, mbError, MB_OK);
   end;
 end;
 

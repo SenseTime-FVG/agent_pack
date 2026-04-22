@@ -1,4 +1,19 @@
 Set-StrictMode -Version Latest
+
+# Force UTF-8 for console I/O.  Windows PowerShell 5.x defaults to GBK (936)
+# on zh-CN hosts, which mangles the Chinese strings in our install-*.ps1
+# messages and also corrupts stdout captured from WSL commands that emit
+# UTF-8.  Setting both Input and OutputEncoding to 65001 applies to every
+# script that dot-sources this file (all four install-*.ps1 do).  This is a
+# no-op on PowerShell 7+, which already defaults to UTF-8.
+try {
+    [System.Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(65001)
+    [System.Console]::InputEncoding = [System.Text.Encoding]::GetEncoding(65001)
+} catch {
+    # Some hosts (e.g. Inno Setup's hidden console) can't mutate encoding —
+    # ignore the failure rather than aborting the install.
+}
+
 $script:RegionChecked = $false
 $script:IsChinaRegion = $false
 
