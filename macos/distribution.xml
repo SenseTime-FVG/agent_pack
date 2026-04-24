@@ -17,6 +17,6 @@
         <pkg-ref id="com.agentpack.pkg"/>
     </choice>
     <pkg-ref id="com.agentpack.pkg"
-             version="1.0.9"
+             version="1.0.10"
              onConclusion="none">AgentPack.pkg</pkg-ref>
 </installer-gui-script>
