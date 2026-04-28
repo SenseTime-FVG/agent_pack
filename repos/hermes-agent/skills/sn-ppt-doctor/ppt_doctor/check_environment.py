@@ -10,7 +10,7 @@ self-contained design so OpenClaw can invoke it via a plain file path.
 
 Sections:
     1. CheckResult dataclass + shared helpers
-    2. Hard checks   (SN_LM_API_KEY, SN_LM_BASE_URL, SN_API_KEY,
+    2. Hard checks   (SN_CHAT_API_KEY or SN_TEXT/SN_VISION API keys, SN_IMAGE_GEN_API_KEY,
                       SN_IMAGE_BASE discovery, sn_agent_runner executable,
                       Node >= 18)
     3. Soft checks   (PPT_DECK_ROOT writable, optional env vars,
@@ -81,13 +81,23 @@ def _env(name: str) -> str | None:
     return val or None
 
 
+def _first_env(*names: str) -> str | None:
+    for name in names:
+        if val := _env(name):
+            return val
+    return None
+
+
 def _find_sn_agent_runner() -> Path | None:
     """Three-level discovery for sn_agent_runner.py.
 
     Level 1: SN_IMAGE_BASE env var -> <path>/scripts/sn_agent_runner.py
               If the var is set but the runner isn't there, stop (do not fall through).
     Level 2: TODO - openclaw registry (not yet implemented)
-    Level 3: repo-relative skills/sn-image-base/scripts/sn_agent_runner.py
+    Level 3: sibling-skill lookup - assume sn-ppt-doctor and sn-image-base are
+              installed under the same skills/ parent directory. Resolve from
+              this file's own location, not from cwd (cwd is the agent's
+              workspace under OpenClaw, not the skills/ root).
               Only tried when SN_IMAGE_BASE is NOT set at all.
     """
     base_env = _env("SN_IMAGE_BASE")
@@ -95,9 +105,11 @@ def _find_sn_agent_runner() -> Path | None:
         candidate = Path(base_env) / "scripts" / "sn_agent_runner.py"
         return candidate if candidate.exists() else None
 
-    repo_candidate = Path.cwd() / "skills" / "sn-image-base" / "scripts" / "sn_agent_runner.py"
-    if repo_candidate.exists():
-        return repo_candidate
+    # __file__ = skills/sn-ppt-doctor/ppt_doctor/check_environment.py -> parents[2] = skills/
+    skills_dir = Path(__file__).resolve().parents[2]
+    sibling_candidate = skills_dir / "sn-image-base" / "scripts" / "sn_agent_runner.py"
+    if sibling_candidate.exists():
+        return sibling_candidate
 
     return None
 
@@ -107,33 +119,33 @@ def _find_sn_agent_runner() -> Path | None:
 # ---------------------------------------------------------------------------
 
 
-def check_u1_lm_api_key() -> CheckResult:
-    val = _env("SN_LM_API_KEY")
+def check_text_chat_api_key() -> CheckResult:
+    val = _first_env("SN_TEXT_API_KEY", "SN_CHAT_API_KEY")
     return CheckResult(
-        name="SN_LM_API_KEY",
+        name="SN_TEXT_API_KEY / SN_CHAT_API_KEY",
         severity="hard",
         passed=val is not None,
-        detail="set" if val else "SN_LM_API_KEY is required for LLM/VLM calls; set it or run /skill sn-ppt-doctor to configure interactively",
+        detail="set" if val else "SN_TEXT_API_KEY or SN_CHAT_API_KEY is required for text chat calls; set it or run /skill sn-ppt-doctor to configure interactively",
     )
 
 
-def check_u1_lm_base_url() -> CheckResult:
-    val = _env("SN_LM_BASE_URL")
+def check_vision_chat_api_key() -> CheckResult:
+    val = _first_env("SN_VISION_API_KEY", "SN_CHAT_API_KEY")
     return CheckResult(
-        name="SN_LM_BASE_URL",
+        name="SN_VISION_API_KEY / SN_CHAT_API_KEY",
         severity="hard",
         passed=val is not None,
-        detail="set" if val else "SN_LM_BASE_URL is required for LLM/VLM calls; set it to the base URL of your LLM service",
+        detail="set" if val else "SN_VISION_API_KEY or SN_CHAT_API_KEY is required for vision chat calls; set it or run /skill sn-ppt-doctor to configure interactively",
     )
 
 
 def check_u1_api_key() -> CheckResult:
-    val = _env("SN_API_KEY")
+    val = _env("SN_IMAGE_GEN_API_KEY")
     return CheckResult(
-        name="SN_API_KEY",
+        name="SN_IMAGE_GEN_API_KEY",
         severity="hard",
         passed=val is not None,
-        detail="set" if val else "SN_API_KEY is required for image generation calls; set it to your U1 API key",
+        detail="set" if val else "SN_IMAGE_GEN_API_KEY is required for image generation calls",
     )
 
 
@@ -151,8 +163,9 @@ def check_sn_image_base_discoverable() -> CheckResult:
         severity="hard",
         passed=False,
         detail=(
-            "sn_agent_runner.py not found. Set SN_IMAGE_BASE to the sn-image-base skill root, "
-            "or run this check from the repo root where skills/sn-image-base/ is a sibling."
+            "sn_agent_runner.py not found. Normally sn-image-base is auto-discovered as a "
+            "sibling skill — make sure it is installed under the same skills/ directory. "
+            "Otherwise set SN_IMAGE_BASE to its install root."
         ),
     )
 
@@ -290,18 +303,23 @@ def check_ppt_deck_root_writable() -> CheckResult:
 
 _OPTIONAL_VARS = [
     "SN_IMAGE_GEN_BASE_URL",
-    "SN_BASE_URL",
     "SN_IMAGE_GEN_MODEL",
     # NOTE: PPT_DECK_ROOT removed — deck_dir is now always $(cwd)/ppt_decks/
     "SN_IMAGE_GEN_MODEL_TYPE",
-    "VLM_API_KEY",
-    "VLM_BASE_URL",
-    "VLM_MODEL",
-    "VLM_TYPE",
-    "LLM_API_KEY",
-    "LLM_BASE_URL",
-    "LLM_MODEL",
-    "LLM_TYPE",
+    "SN_CHAT_BASE_URL",
+    "SN_CHAT_MODEL",
+    "SN_CHAT_TYPE",
+    "SN_CHAT_TIMEOUT",
+    "SN_TEXT_API_KEY",
+    "SN_TEXT_BASE_URL",
+    "SN_TEXT_MODEL",
+    "SN_TEXT_TYPE",
+    "SN_TEXT_TIMEOUT",
+    "SN_VISION_API_KEY",
+    "SN_VISION_BASE_URL",
+    "SN_VISION_MODEL",
+    "SN_VISION_TYPE",
+    "SN_VISION_TIMEOUT",
     "SN_IMAGE_BASE",
 ]
 
@@ -375,8 +393,8 @@ def check_python_deps() -> CheckResult:
 
 def run_all_checks() -> list[CheckResult]:
     return [
-        check_u1_lm_api_key(),
-        check_u1_lm_base_url(),
+        check_text_chat_api_key(),
+        check_vision_chat_api_key(),
         check_u1_api_key(),
         check_sn_image_base_discoverable(),
         check_sn_agent_runner_executable(),
@@ -394,9 +412,8 @@ def run_all_checks() -> list[CheckResult]:
 
 
 REQUIRED = [
-    ("SN_LM_API_KEY", "LLM/VLM API key"),
-    ("SN_LM_BASE_URL", "LLM/VLM endpoint URL"),
-    ("SN_API_KEY", "Image generation API key"),
+    ("SN_CHAT_API_KEY", "shared text/vision chat API key"),
+    ("SN_IMAGE_GEN_API_KEY", "Image generation API key"),
 ]
 
 
